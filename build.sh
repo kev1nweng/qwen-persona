@@ -11,6 +11,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 mkdir -p dist
+touch dist/.nojekyll
 TIMESTAMP=$(date +%s)
 
 cat <<EOF > dist/QwenPersona.user.js
