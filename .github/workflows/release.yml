@@ -33,6 +33,13 @@ jobs:
           echo "timestamp=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
           echo "tag=v$(date +%s)" >> $GITHUB_OUTPUT
 
+      - name: Create and Push Tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag ${{ steps.info.outputs.tag }}
+          git push origin ${{ steps.info.outputs.tag }}
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
