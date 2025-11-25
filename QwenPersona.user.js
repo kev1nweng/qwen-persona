@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QwenPersona
 // @namespace    https://www.kev1nweng.space
-// @version      1764094876
+// @version      1764095119
 // @description  Qwen Chat Custom Persona
 // @author       小翁同学 (kev1nweng)
 // @license      AGPL-3.0
