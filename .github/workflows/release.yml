@@ -1,0 +1,44 @@
+name: Build and Release Userscript
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Build Userscript
+        run: |
+          chmod +x build.sh
+          ./build.sh
+
+      - name: Get Commit Info
+        id: info
+        run: |
+          echo "message=$(git log -1 --pretty=%s)" >> $GITHUB_OUTPUT
+          echo "timestamp=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
+          echo "tag=v$(date +%s)" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.info.outputs.tag }}
+          name: ${{ steps.info.outputs.timestamp }}
+          body: ${{ steps.info.outputs.message }}
+          files: dist/QwenPersona.user.js
+          draft: false
+          prerelease: false
