@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         QwenPersona
 // @namespace    https://www.kev1nweng.space
-// @version      1764093573
+// @version      1764094429
 // @description  Qwen Chat Custom Persona
 // @author       You
 // @match        https://chat.qwen.ai/*
-// @updateURL    https://github.com/kev1nweng/qwen-persona/releases/latest/download/QwenPersona.user.js
-// @downloadURL  https://github.com/kev1nweng/qwen-persona/releases/latest/download/QwenPersona.user.js
+// @updateURL    https://kev1nweng.github.io/qwen-persona/QwenPersona.user.js
+// @downloadURL  https://kev1nweng.github.io/qwen-persona/QwenPersona.user.js
 // @grant        none
 // ==/UserScript==
 
