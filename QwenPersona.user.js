@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         QwenPersona
 // @namespace    https://www.kev1nweng.space
-// @version      1764094429
+// @version      1764094876
 // @description  Qwen Chat Custom Persona
-// @author       You
+// @author       小翁同学 (kev1nweng)
+// @license      AGPL-3.0
 // @match        https://chat.qwen.ai/*
 // @updateURL    https://kev1nweng.github.io/qwen-persona/QwenPersona.user.js
 // @downloadURL  https://kev1nweng.github.io/qwen-persona/QwenPersona.user.js
