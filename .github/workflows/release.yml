@@ -1,17 +1,18 @@
-name: Build and Release Userscript
+name: GitHub Pages
 
 on:
   push:
     branches:
       - main
-  workflow_dispatch:
-
-permissions:
-  contents: write
+  pull_request:
 
 jobs:
-  build-and-release:
+  deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -19,32 +20,16 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 'lts/*'
+          node-version: "lts/*"
 
       - name: Build Userscript
         run: |
           chmod +x build.sh
           ./build.sh
 
-      - name: Get Commit Info
-        id: info
-        run: |
-          echo "message=$(git log -1 --pretty=%s)" >> $GITHUB_OUTPUT
-          echo "timestamp=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
-          echo "tag=v$(date +%s)" >> $GITHUB_OUTPUT
-
-      - name: Create and Push Tag
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag ${{ steps.info.outputs.tag }}
-          git push origin ${{ steps.info.outputs.tag }}
-
-      - name: Create Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create "${{ steps.info.outputs.tag }}" \
-            --title "${{ steps.info.outputs.timestamp }}" \
-            --notes "${{ steps.info.outputs.message }}" \
-            dist/QwenPersona.user.js
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        if: ${{ github.ref == 'refs/heads/main' }}
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
