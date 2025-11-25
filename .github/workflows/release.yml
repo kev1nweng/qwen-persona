@@ -25,7 +25,7 @@ jobs:
       - name: Build Userscript
         run: |
           chmod +x build.sh
-          ./build.sh
+          ./build.sh --gf
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
