@@ -1,5 +1,7 @@
 # Qwen Persona
 
+[I can't read Chinese](README.en.md)
+
 一个便于用户自定义、保存并同步 Qwen Chat 自定义角色的 Tampermonkey 脚本。
 A Tampermonkey script for customizing user-defined personas in Qwen Chat.
 
@@ -34,3 +36,13 @@ A Tampermonkey script for customizing user-defined personas in Qwen Chat.
 
 > [!TIP]
 > 角色数据保存在 `localStorage` 中，可以通过在浏览器控制台执行 `localStorage.getItem('qwen_personas')` 来导出和备份。
+
+## 声明 Disclaimer
+
+本脚本与 Qwen 官方**无任何关联**，所有功能均为 **个人开发和维护。**
+
+> This script is **NOT affiliated with Qwen in any way**; all features are **developed and maintained personally.**
+
+如果您确信该脚本侵犯了您的权益，**请通过 GitHub Issues 联系我，我会及时处理。**
+
+> If you believe this script infringes on your rights, **please contact me via GitHub Issues, and I will address it promptly.**
