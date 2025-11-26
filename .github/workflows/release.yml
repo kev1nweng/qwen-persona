@@ -26,6 +26,7 @@ jobs:
         run: |
           chmod +x build.sh
           ./build.sh --gf
+          ./build.sh --gf --domestic
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
