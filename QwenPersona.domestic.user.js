@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         QwenPersona
+// @name         QwenPersona (Domestic)
 // @namespace    https://www.kev1nweng.space
 // @version      1764191663
 // @description  一个便于用户自定义、保存并同步 Qwen Chat 自定义角色的 Tampermonkey 脚本。A Tampermonkey script for customizing user-defined personas in Qwen Chat.
 // @author       小翁同学 (kev1nweng)
 // @license      AGPL-3.0
 // @match        https://chat.qwen.ai/*
-// @updateURL    https://kev1nweng.github.io/qwen-persona/QwenPersona.user.js
-// @downloadURL  https://kev1nweng.github.io/qwen-persona/QwenPersona.user.js
+// @updateURL    https://kev1nweng.github.io/qwen-persona/QwenPersona.domestic.user.js
+// @downloadURL  https://kev1nweng.github.io/qwen-persona/QwenPersona.domestic.user.js
 // @grant        none
 // ==/UserScript==
 
@@ -43,23 +43,21 @@
       INPUT_WEB_SEARCH: "persona-web-search-input",
 
       // Qwen UI Elements
-      HEADER_DESKTOP: ".header-desktop",
-      HEADER_LEFT: ".header-desktop .header-content .header-left",
-      MODEL_SELECTOR: '[class*="index-module__web-model-selector"]',
-      MODEL_SELECTOR_CONTENT: '[class*="index-module__model-selector-content"]',
-      MODEL_SELECTOR_DROPDOWN:
-        '[class*="index-module__model-selector-dropdown"]',
-      MODEL_SELECTOR_ITEM: '[class*="index-module__model-selector-item"]',
-      MODEL_NAME_TEXT: '[class*="index-module__model-name-text"]',
-      MODEL_SELECTOR_VIEW_MORE:
-        '[class*="index-module__model-selector-view-more"]',
-      MODEL_VIEW_MORE_TEXT: '[class*="index-module__view-more-text"]',
-      ANT_DROPDOWN_TRIGGER: ".ant-dropdown-trigger",
-      CHAT_INPUT_FEATURE_BTN: ".chat-input-feature-btn",
-      CHAT_INPUT_FEATURE_TEXT: ".chat-input-feature-btn-text",
-      WEB_SEARCH_BTN: "button.websearch_button",
-      TEXTAREA: "textarea",
-      INPUT_CONTAINER: ".chat-message-input-container-inner",
+      HEADER_DESKTOP: ".chatContent .sticky", // 国内版没有 header-desktop，使用顶部导航栏
+      HEADER_LEFT: ".chatContent .sticky .flex.w-full.max-w-full.items-center", // 导航栏左侧区域
+      MODEL_SELECTOR: ".selected-model-item", // 模型选择器容器
+      MODEL_SELECTOR_CONTENT: ".pc-select-model-text", // 模型选择器内容/文字
+      MODEL_SELECTOR_DROPDOWN: '[role="menu"][data-melt-dropdown-menu]', // 下拉菜单（Svelte melt-ui）
+      MODEL_SELECTOR_ITEM: 'button[aria-label="model-item"]', // 模型项按钮
+      MODEL_NAME_TEXT: ".text-sm", // 模型名称文字（在嵌套 div 内）
+      MODEL_SELECTOR_VIEW_MORE: ".expand-more", // 查看更多按钮
+      MODEL_VIEW_MORE_TEXT: ".expand-more-text", // 查看更多按钮文本
+      ANT_DROPDOWN_TRIGGER: "[data-melt-dropdown-menu-trigger]", // Svelte 使用 melt-ui 而非 ant-design
+      CHAT_INPUT_FEATURE_BTN: ".chat-input-feature-btn", // 相同
+      CHAT_INPUT_FEATURE_TEXT: ".chat-input-feature-btn-text", // 相同
+      WEB_SEARCH_BTN: "button.websearch_button", // 相同
+      TEXTAREA: "#chat-input, textarea.text-area-box-web", // 国内版有特定 ID 和类名
+      INPUT_CONTAINER: ".chat-message-input-container-inner", // 相同
 
       // Classes
       TRIGGER_COLLAPSED: "collapsed",
@@ -286,6 +284,11 @@
       const style = document.createElement("style");
       style.id = CONSTANTS.SELECTORS.STYLE_ID;
       style.textContent = `
+            /* New Chat Button Spacing */
+            #new-chat-button {
+                margin-right: 12px;
+            }
+
             /* Persona Dropdown Container */
             .persona-dropdown-container {
                 position: relative;
@@ -356,7 +359,6 @@
               justify-content: center;
               background: transparent;
               gap: 0;
-              margin-right: 4px;
             }
 
             .persona-trigger.collapsed:hover {
@@ -875,26 +877,36 @@
                 color: var(--btn-brandprimary-fill, #615ced);
             }
 
-            /* Adjust model selector margin */
-            [class*="index-module__web-model-selector"] {
-                margin-left: 0;
+            /* Hide native model selector when agent is active - 国内版 */
+            body.persona-agent-active .selected-model-item {
+                display: none !important;
             }
 
-            /* Hide native model selector when agent is active */
+            /* 同时兼容国际版的选择器 */
             body.persona-agent-active [class*="index-module__web-model-selector"] {
                 display: none !important;
             }
 
             /* Hide the "设为默认/取消默认" button when agent is active */
-            /* This might need adjustment based on new structure, but usually it's near the selector */
             body.persona-agent-active [class*="index-module__add-model-icon"] {
                 display: none !important;
             }
 
-            /* Adjust navbar layout when model selector is hidden */
-            body.persona-agent-active .persona-dropdown-container {
-                margin-left: 0;
-                margin-right: 16px;
+            /* Hide the "设为默认" button in domestic version when agent is active */
+            body.persona-agent-active .selected-model-item + div.absolute {
+                display: none !important;
+            }
+
+            /* Alternative selector for the default model button */
+            body.persona-agent-active .max-w-full > div.font-primary.absolute {
+                display: none !important;
+            }
+
+            /* Hide the "添加模型" (add model) button when agent is active - domestic version */
+            body.persona-agent-active div[aria-label="添加模型"],
+            body.persona-agent-active button[aria-label="Add Model"],
+            body.persona-agent-active .selected-model-item + div.flex {
+                display: none !important;
             }
 
             /* Emoji Picker Styles */
@@ -973,7 +985,9 @@
             <span class="persona-trigger-icon">🤖</span>
             <span class="persona-trigger-text">${I18n.t("noPersona")}</span>
             <span class="persona-trigger-arrow">
-                <svg width="1em" height="1em" fill="currentColor" aria-hidden="true" focusable="false"><use xlink:href="#icon-line-chevron-down"></use></svg>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M2.5 4.5L6 8L9.5 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
             </span>
         `;
 
@@ -1518,8 +1532,23 @@
 
           const container = UI.createDropdownUI();
 
-          if (modelSelector) {
+          if (modelSelector && modelSelector.parentNode === headerLeft) {
+            // Model selector is a direct child, insert before it
             headerLeft.insertBefore(container, modelSelector);
+          } else if (modelSelector) {
+            // Model selector exists but is nested deeper, insert before its closest ancestor that is a direct child
+            let targetChild = modelSelector;
+            while (
+              targetChild.parentNode &&
+              targetChild.parentNode !== headerLeft
+            ) {
+              targetChild = targetChild.parentNode;
+            }
+            if (targetChild.parentNode === headerLeft) {
+              headerLeft.insertBefore(container, targetChild);
+            } else {
+              headerLeft.appendChild(container);
+            }
           } else {
             headerLeft.appendChild(container);
           }
@@ -1664,16 +1693,12 @@
         }
 
         if (modelButton) {
-          const itemContainer = modelButton.closest(
-            CONSTANTS.SELECTORS.MODEL_SELECTOR_ITEM
-          );
+          // 国内版：按钮本身就是模型项，disabled 或有 check 图标表示已选中
+          const isSelected =
+            modelButton.hasAttribute("disabled") ||
+            modelButton.querySelector(".icon-line-check-contained");
 
-          if (
-            itemContainer &&
-            Array.from(itemContainer.classList).some((c) =>
-              c.includes("index-module__model-selector-item-selected")
-            )
-          ) {
+          if (isSelected) {
             console.log("[QwenPersona] Model already selected:", modelId);
             ModelManager.closeModelSelector();
             return true;
@@ -2269,6 +2294,12 @@
               let body = JSON.parse(options.body);
               let modified = false;
 
+              // Detect if this is an edit action (user editing a previous message)
+              const isEditAction =
+                Array.isArray(body.messages) &&
+                body.messages.some((m) => m.user_action === "edit");
+
+              // Detect if this is truly a new chat (no existing conversation context)
               const isNewChat =
                 (!body.conversation_id &&
                   !body.conversationId &&
@@ -2276,16 +2307,23 @@
                 (!body.parent_id &&
                   !body.parentId &&
                   body.messages &&
-                  body.messages.length === 1);
+                  body.messages.length === 1 &&
+                  !isEditAction);
 
               const hasSystemMessage =
                 Array.isArray(body.messages) &&
                 body.messages.some((m) => m.role === "system");
 
+              // Check if chat_id exists in URL (indicates existing conversation)
+              const urlChatIdMatch = url.match(/chat_id=([a-zA-Z0-9-]+)/);
+              const urlHasChatId = !!urlChatIdMatch;
+
               console.log("[QwenPersona] Debug - Request Check:", {
                 url,
                 isNewChat,
+                isEditAction,
                 hasSystemMessage,
+                urlHasChatId,
                 chat_id: body.chat_id,
                 parent_id: body.parent_id || body.parentId,
                 messageCount: body.messages ? body.messages.length : 0,
@@ -2297,7 +2335,32 @@
                   (m) => m.role === "system"
                 );
 
-                if (systemMsgIndex !== -1) {
+                // For edit actions: the server does NOT retain the system message
+                // We need to inject the system prompt into the user message instead
+                // because the API only allows one system message at the conversation root
+                if (isEditAction && urlHasChatId) {
+                  // Remove any existing system message first (to avoid duplicates)
+                  if (systemMsgIndex !== -1) {
+                    console.log(
+                      "[QwenPersona] Debug - Removing existing System Message for edit action"
+                    );
+                    body.messages.splice(systemMsgIndex, 1);
+                  }
+                  // Prepend system prompt to user message content
+                  const userMsgIndex = body.messages.findIndex(
+                    (m) => m.role === "user"
+                  );
+                  if (userMsgIndex !== -1) {
+                    const userMsg = body.messages[userMsgIndex];
+                    if (!userMsg.content.startsWith(persona.prompt)) {
+                      console.log(
+                        "[QwenPersona] Debug - Prepending System Prompt to User Message (Edit Action)"
+                      );
+                      userMsg.content = `[System Instruction]\n${persona.prompt}\n\n[User Message]\n${userMsg.content}`;
+                      modified = true;
+                    }
+                  }
+                } else if (systemMsgIndex !== -1) {
                   console.log(
                     "[QwenPersona] Debug - Updating existing System Prompt"
                   );
@@ -2314,9 +2377,9 @@
                   // Check if this is the start of a conversation (no parent_id)
                   // If parent_id exists, it's a continuation, and we CANNOT inject a system message (server restriction)
                   const isStartOfConversation =
-                    !body.parent_id && !body.parentId;
+                    !body.parent_id && !body.parentId && !isEditAction;
 
-                  if (isStartOfConversation) {
+                  if (isStartOfConversation && !urlHasChatId) {
                     console.log(
                       "[QwenPersona] Debug - Injecting System Prompt (New Chat/Root)"
                     );
@@ -2327,15 +2390,16 @@
                     modified = true;
                   } else {
                     console.log(
-                      "[QwenPersona] Debug - Injecting System Prompt (User Prepend - Continuation)"
+                      "[QwenPersona] Debug - Prepending System Prompt to User Message (Continuation)"
                     );
                     const lastMsg = body.messages[body.messages.length - 1];
                     if (
                       lastMsg &&
                       lastMsg.role === "user" &&
-                      !lastMsg.content.startsWith(persona.prompt)
+                      !lastMsg.content.startsWith(persona.prompt) &&
+                      !lastMsg.content.startsWith("[System Instruction]")
                     ) {
-                      lastMsg.content = `${persona.prompt}\n\n${lastMsg.content}`;
+                      lastMsg.content = `[System Instruction]\n${persona.prompt}\n\n[User Message]\n${lastMsg.content}`;
                       modified = true;
                     }
                   }
