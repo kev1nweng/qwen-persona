@@ -5,8 +5,8 @@
 A Tampermonkey script for customizing, saving, and syncing user-defined personas in Qwen Chat.
 
 <p align="center">
-  <img src="docs/image.png" alt="QwenPersona selection dropdown menu" width="45%" />
-  <img src="docs/image-1.png" alt="QwenPersona add persona panel" width="45%" />
+  <img src="docs/image.en.png" alt="QwenPersona selection dropdown menu" width="45%" />
+  <img src="docs/image-1.en.png" alt="QwenPersona add persona panel" width="45%" />
 </p>
 
 ## Installation

@@ -1023,11 +1023,11 @@
           featureBadges = '<div class="persona-dropdown-item-features">';
           if (persona.deepThinking) {
             featureBadges +=
-              '<span class="persona-feature-badge active">深度思考</span>';
+              `<span class="persona-feature-badge active">${I18n.t("deepThinking")}</span>`;
           }
           if (persona.webSearch) {
             featureBadges +=
-              '<span class="persona-feature-badge active">联网</span>';
+              `<span class="persona-feature-badge active">${I18n.t("webSearch")}</span>`;
           }
           featureBadges += "</div>";
         }
