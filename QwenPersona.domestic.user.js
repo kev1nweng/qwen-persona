@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QwenPersona (Domestic)
 // @namespace    https://www.kev1nweng.space
-// @version      1764194214
+// @version      1764268716
 // @description  一个便于用户自定义、保存并同步 Qwen Chat 自定义角色的 Tampermonkey 脚本。A Tampermonkey script for customizing user-defined personas in Qwen Chat.
 // @author       小翁同学 (kev1nweng)
 // @license      AGPL-3.0
@@ -1049,12 +1049,14 @@
         if (persona.deepThinking || persona.webSearch) {
           featureBadges = '<div class="persona-dropdown-item-features">';
           if (persona.deepThinking) {
-            featureBadges +=
-              `<span class="persona-feature-badge active">${I18n.t("deepThinking")}</span>`;
+            featureBadges += `<span class="persona-feature-badge active">${I18n.t(
+              "deepThinking"
+            )}</span>`;
           }
           if (persona.webSearch) {
-            featureBadges +=
-              `<span class="persona-feature-badge active">${I18n.t("webSearch")}</span>`;
+            featureBadges += `<span class="persona-feature-badge active">${I18n.t(
+              "webSearch"
+            )}</span>`;
           }
           featureBadges += "</div>";
         }
