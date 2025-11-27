@@ -1036,12 +1036,14 @@
         if (persona.deepThinking || persona.webSearch) {
           featureBadges = '<div class="persona-dropdown-item-features">';
           if (persona.deepThinking) {
-            featureBadges +=
-              `<span class="persona-feature-badge active">${I18n.t("deepThinking")}</span>`;
+            featureBadges += `<span class="persona-feature-badge active">${I18n.t(
+              "deepThinking"
+            )}</span>`;
           }
           if (persona.webSearch) {
-            featureBadges +=
-              `<span class="persona-feature-badge active">${I18n.t("webSearch")}</span>`;
+            featureBadges += `<span class="persona-feature-badge active">${I18n.t(
+              "webSearch"
+            )}</span>`;
           }
           featureBadges += "</div>";
         }

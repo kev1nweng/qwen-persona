@@ -1022,12 +1022,14 @@
         if (persona.deepThinking || persona.webSearch) {
           featureBadges = '<div class="persona-dropdown-item-features">';
           if (persona.deepThinking) {
-            featureBadges +=
-              `<span class="persona-feature-badge active">${I18n.t("deepThinking")}</span>`;
+            featureBadges += `<span class="persona-feature-badge active">${I18n.t(
+              "deepThinking"
+            )}</span>`;
           }
           if (persona.webSearch) {
-            featureBadges +=
-              `<span class="persona-feature-badge active">${I18n.t("webSearch")}</span>`;
+            featureBadges += `<span class="persona-feature-badge active">${I18n.t(
+              "webSearch"
+            )}</span>`;
           }
           featureBadges += "</div>";
         }
@@ -2256,6 +2258,12 @@
               let body = JSON.parse(options.body);
               let modified = false;
 
+              // Detect if this is an edit action (user editing a previous message)
+              const isEditAction =
+                Array.isArray(body.messages) &&
+                body.messages.some((m) => m.user_action === "edit");
+
+              // Detect if this is truly a new chat (no existing conversation context)
               const isNewChat =
                 (!body.conversation_id &&
                   !body.conversationId &&
@@ -2263,16 +2271,23 @@
                 (!body.parent_id &&
                   !body.parentId &&
                   body.messages &&
-                  body.messages.length === 1);
+                  body.messages.length === 1 &&
+                  !isEditAction);
 
               const hasSystemMessage =
                 Array.isArray(body.messages) &&
                 body.messages.some((m) => m.role === "system");
 
+              // Check if chat_id exists in URL (indicates existing conversation)
+              const urlChatIdMatch = url.match(/chat_id=([a-zA-Z0-9-]+)/);
+              const urlHasChatId = !!urlChatIdMatch;
+
               console.log("[QwenPersona] Debug - Request Check:", {
                 url,
                 isNewChat,
+                isEditAction,
                 hasSystemMessage,
+                urlHasChatId,
                 chat_id: body.chat_id,
                 parent_id: body.parent_id || body.parentId,
                 messageCount: body.messages ? body.messages.length : 0,
@@ -2284,7 +2299,32 @@
                   (m) => m.role === "system"
                 );
 
-                if (systemMsgIndex !== -1) {
+                // For edit actions: the server does NOT retain the system message
+                // We need to inject the system prompt into the user message instead
+                // because the API only allows one system message at the conversation root
+                if (isEditAction && urlHasChatId) {
+                  // Remove any existing system message first (to avoid duplicates)
+                  if (systemMsgIndex !== -1) {
+                    console.log(
+                      "[QwenPersona] Debug - Removing existing System Message for edit action"
+                    );
+                    body.messages.splice(systemMsgIndex, 1);
+                  }
+                  // Prepend system prompt to user message content
+                  const userMsgIndex = body.messages.findIndex(
+                    (m) => m.role === "user"
+                  );
+                  if (userMsgIndex !== -1) {
+                    const userMsg = body.messages[userMsgIndex];
+                    if (!userMsg.content.startsWith(persona.prompt)) {
+                      console.log(
+                        "[QwenPersona] Debug - Prepending System Prompt to User Message (Edit Action)"
+                      );
+                      userMsg.content = `[System Instruction]\n${persona.prompt}\n\n[User Message]\n${userMsg.content}`;
+                      modified = true;
+                    }
+                  }
+                } else if (systemMsgIndex !== -1) {
                   console.log(
                     "[QwenPersona] Debug - Updating existing System Prompt"
                   );
@@ -2301,9 +2341,9 @@
                   // Check if this is the start of a conversation (no parent_id)
                   // If parent_id exists, it's a continuation, and we CANNOT inject a system message (server restriction)
                   const isStartOfConversation =
-                    !body.parent_id && !body.parentId;
+                    !body.parent_id && !body.parentId && !isEditAction;
 
-                  if (isStartOfConversation) {
+                  if (isStartOfConversation && !urlHasChatId) {
                     console.log(
                       "[QwenPersona] Debug - Injecting System Prompt (New Chat/Root)"
                     );
@@ -2314,15 +2354,16 @@
                     modified = true;
                   } else {
                     console.log(
-                      "[QwenPersona] Debug - Injecting System Prompt (User Prepend - Continuation)"
+                      "[QwenPersona] Debug - Prepending System Prompt to User Message (Continuation)"
                     );
                     const lastMsg = body.messages[body.messages.length - 1];
                     if (
                       lastMsg &&
                       lastMsg.role === "user" &&
-                      !lastMsg.content.startsWith(persona.prompt)
+                      !lastMsg.content.startsWith(persona.prompt) &&
+                      !lastMsg.content.startsWith("[System Instruction]")
                     ) {
-                      lastMsg.content = `${persona.prompt}\n\n${lastMsg.content}`;
+                      lastMsg.content = `[System Instruction]\n${persona.prompt}\n\n[User Message]\n${lastMsg.content}`;
                       modified = true;
                     }
                   }
