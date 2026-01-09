@@ -1,6 +1,64 @@
 (function () {
   "use strict";
 
+  // ==================== Debug Helpers ====================
+  // Enable with: localStorage.setItem('qwen_persona_debug','1') then refresh.
+  // Disable with: localStorage.removeItem('qwen_persona_debug') then refresh.
+  const Debug = {
+    enabled: false,
+    _events: [],
+    _maxEvents: 250,
+    init() {
+      try {
+        this.enabled = localStorage.getItem("qwen_persona_debug") === "1";
+      } catch (e) {
+        this.enabled = false;
+      }
+    },
+    event(type, data = {}) {
+      try {
+        const entry = {
+          t: new Date().toISOString(),
+          type,
+          url: location.href,
+          ...data,
+        };
+        this._events.push(entry);
+        if (this._events.length > this._maxEvents) {
+          this._events.splice(0, this._events.length - this._maxEvents);
+        }
+      } catch (e) {}
+    },
+    getEvents() {
+      return this._events.slice();
+    },
+    log(...args) {
+      if (!this.enabled) return;
+      console.log("[QwenPersona][DBG]", ...args);
+    },
+    warn(...args) {
+      if (!this.enabled) return;
+      console.warn("[QwenPersona][DBG]", ...args);
+    },
+    table(obj) {
+      if (!this.enabled) return;
+      try {
+        console.table(obj);
+      } catch (e) {
+        console.log("[QwenPersona][DBG]", obj);
+      }
+    },
+    stack(label) {
+      if (!this.enabled) return;
+      try {
+        const err = new Error(label || "stack");
+        console.log("[QwenPersona][DBG] stack:", err.stack);
+      } catch (e) {}
+    },
+  };
+
+  Debug.init();
+
   // ==================== Constants & Configuration ====================
   const CONSTANTS = {
     STORAGE: {
@@ -75,6 +133,9 @@
     editingPersona: null,
     lastUrl: location.href,
     chatPersonaMap: {},
+    // When Qwen creates a new chat, the URL->chatId mapping may lag the first request.
+    // We store a short-lived personaId here and bind it to the chatId once it appears.
+    pendingNewChatPersona: null, // { personaId, ts, reason }
   };
 
   // ==================== I18n Service ====================
@@ -2107,11 +2168,30 @@
   const ChatManager = {
     getCurrentChatId(url = location.pathname) {
       const match = url.match(/\/(?:c|chat)\/([a-zA-Z0-9-]+)/);
-      return match ? match[1] : null;
+      const id = match ? match[1] : null;
+      if (!id) return null;
+
+      // Qwen often uses pseudo routes like /c/new for the start screen.
+      // Treat these as "no real chat" to avoid persisting mappings to a shared key.
+      const pseudoIds = new Set(["new", "create", "start", "home", "null", "undefined"]);
+      if (pseudoIds.has(id.toLowerCase())) {
+        Debug.log("getCurrentChatId pseudo route", { url, id });
+        return null;
+      }
+
+      Debug.log("getCurrentChatId", { url, id });
+
+      return id;
     },
 
     setPersonaForCurrentChat(personaId) {
       const chatId = ChatManager.getCurrentChatId();
+      Debug.log("setPersonaForCurrentChat", {
+        url: location.href,
+        chatId,
+        personaId,
+        selectedPersonaId: State.selectedPersonaId,
+      });
       if (chatId) {
         if (personaId) {
           State.chatPersonaMap[chatId] = personaId;
@@ -2125,6 +2205,11 @@
           "to persona",
           personaId
         );
+        Debug.log("chatPersonaMap[chatId] now", {
+          chatId,
+          mappedTo: State.chatPersonaMap[chatId] || null,
+          mapSize: Object.keys(State.chatPersonaMap || {}).length,
+        });
       }
     },
 
@@ -2191,6 +2276,25 @@
       const prevChatId = ChatManager.getCurrentChatId(State.lastUrl);
       const currChatId = ChatManager.getCurrentChatId(currentUrl);
 
+      Debug.event("url_change", {
+        lastUrl: State.lastUrl,
+        currentUrl,
+        prevChatId,
+        currChatId,
+        selectedPersonaId: State.selectedPersonaId,
+        pendingNewChatPersona: State.pendingNewChatPersona,
+      });
+
+      Debug.log("handleUrlChange ids", {
+        lastUrl: State.lastUrl,
+        currentUrl,
+        prevChatId,
+        currChatId,
+        selectedPersonaId: State.selectedPersonaId,
+        hasMappingForCurr: !!(currChatId && State.chatPersonaMap[currChatId]),
+        mapSize: Object.keys(State.chatPersonaMap || {}).length,
+      });
+
       if (
         !prevChatId &&
         currChatId &&
@@ -2203,6 +2307,38 @@
         );
         State.chatPersonaMap[currChatId] = State.selectedPersonaId;
         Storage.saveChatPersonaMap();
+        Debug.log("mapped new chat on navigation", {
+          currChatId,
+          mappedTo: State.selectedPersonaId,
+        });
+        Debug.event("map_new_chat_from_selection", {
+          currChatId,
+          mappedTo: State.selectedPersonaId,
+        });
+      }
+
+      // Bridge: if we just sent the first message of a new chat, bind the pending persona
+      // to the chatId once the URL shows it.
+      if (currChatId && !State.chatPersonaMap[currChatId] && State.pendingNewChatPersona) {
+        const ageMs = Date.now() - (State.pendingNewChatPersona.ts || 0);
+        if (ageMs >= 0 && ageMs < 15000) {
+          State.chatPersonaMap[currChatId] = State.pendingNewChatPersona.personaId;
+          Storage.saveChatPersonaMap();
+          Debug.log("bridged pending persona to chat", {
+            currChatId,
+            mappedTo: State.pendingNewChatPersona.personaId,
+            ageMs,
+            reason: State.pendingNewChatPersona.reason,
+          });
+          Debug.event("map_new_chat_from_pending", {
+            currChatId,
+            mappedTo: State.pendingNewChatPersona.personaId,
+            ageMs,
+            reason: State.pendingNewChatPersona.reason,
+          });
+        }
+        // Always clear after attempting to bind to avoid accidentally affecting later navigations.
+        State.pendingNewChatPersona = null;
       }
 
       State.lastUrl = currentUrl;
@@ -2213,6 +2349,10 @@
           UI.waitForNavbar();
         }
 
+        Debug.log("calling autoSelectPersonaForChat after navigation", {
+          url: location.href,
+          selectedPersonaId: State.selectedPersonaId,
+        });
         PersonaManager.autoSelectPersonaForChat();
       }, 300);
     },
@@ -2221,6 +2361,19 @@
   // ==================== Persona Manager ====================
   const PersonaManager = {
     selectPersona(id) {
+      Debug.event("select_persona", {
+        fromSelected: State.selectedPersonaId,
+        toSelected: id || null,
+        chatId: ChatManager.getCurrentChatId(),
+      });
+      Debug.log("selectPersona called", {
+        fromSelected: State.selectedPersonaId,
+        toSelected: id || null,
+        url: location.href,
+        chatId: ChatManager.getCurrentChatId(),
+      });
+      Debug.stack("selectPersona");
+
       State.selectedPersonaId = id || null;
       Storage.saveSelectedPersona();
       UI.updateTriggerUI();
@@ -2271,6 +2424,20 @@
         State.selectedPersonaId = null;
         Storage.saveSelectedPersona();
         UI.updateTriggerUI();
+      }
+
+      // Clean up any stored chat mappings pointing to this persona
+      try {
+        let changed = false;
+        for (const [chatId, personaId] of Object.entries(State.chatPersonaMap)) {
+          if (personaId === id) {
+            delete State.chatPersonaMap[chatId];
+            changed = true;
+          }
+        }
+        if (changed) Storage.saveChatPersonaMap();
+      } catch (e) {
+        // ignore cleanup failures
       }
 
       UI.renderDropdownMenu();
@@ -2377,9 +2544,27 @@
     autoSelectPersonaForChat() {
       const chatId = ChatManager.getCurrentChatId();
 
+      Debug.log("autoSelectPersonaForChat", {
+        url: location.href,
+        chatId,
+        selectedPersonaId: State.selectedPersonaId,
+        recordedPersonaId: chatId ? State.chatPersonaMap[chatId] : null,
+      });
+
       if (!chatId) {
-        if (State.selectedPersonaId) {
-          console.log("[QwenPersona] No chat ID (Home/New), resetting to None");
+        // New chat start page: Qwen currently uses the site root (/).
+        // On this screen we show "No Persona" by default (no per-chat mapping exists yet).
+        // This also avoids accidentally carrying persona selection across chats.
+        const isRootHome = location.pathname === "/" || location.pathname === "";
+        const isPseudoStart = /\/(?:c|chat)\/(new|create|start|home)(?:\/|$)/i.test(
+          location.pathname
+        );
+        if ((isRootHome || isPseudoStart) && State.selectedPersonaId) {
+          Debug.log("Home/New page detected, resetting persona to None", {
+            url: location.href,
+            pathname: location.pathname,
+            selectedPersonaId: State.selectedPersonaId,
+          });
           PersonaManager.selectPersona(null);
         }
         return;
@@ -2387,10 +2572,46 @@
 
       const recordedPersonaId = State.chatPersonaMap[chatId];
 
+      // New-chat bridge: if a first-message request happened recently, we may have a
+      // pending persona before the mapping is written. Prefer it over clearing selection.
+      if (!recordedPersonaId && State.pendingNewChatPersona) {
+        const ageMs = Date.now() - (State.pendingNewChatPersona.ts || 0);
+        if (ageMs >= 0 && ageMs < 15000) {
+          const pendingId = State.pendingNewChatPersona.personaId;
+          Debug.log("autoSelect: using pending persona bridge", {
+            chatId,
+            pendingId,
+            ageMs,
+            reason: State.pendingNewChatPersona.reason,
+          });
+          Debug.event("auto_select_from_pending", {
+            chatId,
+            pendingId,
+            ageMs,
+            reason: State.pendingNewChatPersona.reason,
+          });
+
+          // Persist mapping now.
+          State.chatPersonaMap[chatId] = pendingId;
+          Storage.saveChatPersonaMap();
+          State.pendingNewChatPersona = null;
+
+          if (pendingId && pendingId !== State.selectedPersonaId) {
+            PersonaManager.selectPersona(pendingId);
+          }
+          return;
+        }
+      }
+
       if (recordedPersonaId) {
         const personaExists = State.personas.find(
           (p) => p.id === recordedPersonaId
         );
+        Debug.log("autoSelect: mapping exists", {
+          chatId,
+          recordedPersonaId,
+          personaExists: !!personaExists,
+        });
         if (personaExists) {
           if (recordedPersonaId !== State.selectedPersonaId) {
             console.log(
@@ -2402,9 +2623,20 @@
             PersonaManager.selectPersona(recordedPersonaId);
           }
         } else {
+          // Mapping points to a deleted/nonexistent persona. Remove it to avoid repeated flips.
+          Debug.warn("autoSelect: mapping points to missing persona; deleting mapping", {
+            chatId,
+            recordedPersonaId,
+          });
+          delete State.chatPersonaMap[chatId];
+          Storage.saveChatPersonaMap();
           if (State.selectedPersonaId) PersonaManager.selectPersona(null);
         }
       } else {
+        Debug.log("autoSelect: no mapping for this chat", {
+          chatId,
+          selectedPersonaId: State.selectedPersonaId,
+        });
         if (State.selectedPersonaId) {
           console.log(
             "[QwenPersona] No mapping for this chat, resetting to None"
@@ -2469,6 +2701,36 @@
                 messageCount: body.messages ? body.messages.length : 0,
                 personaPrompt: !!persona.prompt,
               });
+
+              // If we are sending the first message of a new chat, remember which persona was active.
+              // The URL might change slightly later; we'll bind this persona to the new chatId on navigation.
+              if (isNewChat && persona && persona.id) {
+                State.pendingNewChatPersona = {
+                  personaId: persona.id,
+                  ts: Date.now(),
+                  reason: "first_message_new_chat_request",
+                };
+                Debug.event("pending_new_chat_persona_set", {
+                  personaId: persona.id,
+                  personaName: persona.name,
+                  url,
+                });
+
+                // If the chatId is already present in the URL, bind immediately.
+                // Some Qwen flows enter /c/<uuid> before the first completions request.
+                const currChatId = ChatManager.getCurrentChatId();
+                if (currChatId && !State.chatPersonaMap[currChatId]) {
+                  State.chatPersonaMap[currChatId] = persona.id;
+                  Storage.saveChatPersonaMap();
+                  Debug.event("map_new_chat_from_pending_immediate", {
+                    currChatId,
+                    mappedTo: persona.id,
+                    personaName: persona.name,
+                  });
+                  // Clear pending to avoid affecting later navigations.
+                  State.pendingNewChatPersona = null;
+                }
+              }
 
               if (persona.prompt && Array.isArray(body.messages)) {
                 const systemMsgIndex = body.messages.findIndex(
@@ -2604,6 +2866,29 @@
         Storage.loadPersonas();
         Storage.loadSelectedPersona();
         UI.updateTriggerUI();
+      },
+      debugDump: () => {
+        const chatId = ChatManager.getCurrentChatId();
+        const payload = {
+          url: location.href,
+          chatId,
+          selectedPersonaId: State.selectedPersonaId,
+          selectedPersonaName:
+            State.personas.find((p) => p.id === State.selectedPersonaId)?.name ||
+            null,
+          recordedPersonaId: chatId ? State.chatPersonaMap[chatId] : null,
+          recordedPersonaName:
+            chatId && State.chatPersonaMap[chatId]
+              ? State.personas.find((p) => p.id === State.chatPersonaMap[chatId])
+                  ?.name || null
+              : null,
+          pendingNewChatPersona: State.pendingNewChatPersona,
+          mapSize: Object.keys(State.chatPersonaMap || {}).length,
+          mapSample: Object.entries(State.chatPersonaMap || {}).slice(0, 10),
+          debugEvents: typeof Debug !== "undefined" ? Debug.getEvents() : [],
+        };
+        console.log("[QwenPersona] debugDump", payload);
+        return payload;
       },
     };
 
