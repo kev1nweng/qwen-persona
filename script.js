@@ -136,6 +136,8 @@
       WEB_SEARCH_BTN: "button.websearch_button",
       TEXTAREA: "textarea#chat-input, textarea.chat-input, textarea",
       INPUT_CONTAINER: ".prompt-input-container, .chat-input-container, .chat-message-input-container-inner",
+      CHAT_MESSAGE_INPUT: ".chat-message-input, #chat-message-input",
+      CHAT_PROMPT_INPUT_CONTAINER: ".chat-prompt-input-container, .chat-prompt-input",
 
       // Classes
       TRIGGER_COLLAPSED: "collapsed",
@@ -1556,12 +1558,18 @@
 
       const textareas = document.querySelectorAll(CONSTANTS.SELECTORS.TEXTAREA);
       textareas.forEach((t) => {
-        const container =
+        // Find the outermost chat-message-input container for visual effect
+        const outerContainer = t.closest(CONSTANTS.SELECTORS.CHAT_MESSAGE_INPUT);
+        // Also find the inner container for additional styling
+        const innerContainer =
           t.closest(CONSTANTS.SELECTORS.INPUT_CONTAINER) || t.parentElement;
+        // Find the prompt input container as well
+        const promptContainer = t.closest(CONSTANTS.SELECTORS.CHAT_PROMPT_INPUT_CONTAINER);
 
-        if (container) {
-          container.classList.add(CONSTANTS.SELECTORS.TRANSITION);
-        }
+        // Add transition class to all containers
+        [outerContainer, innerContainer, promptContainer].forEach((c) => {
+          if (c) c.classList.add(CONSTANTS.SELECTORS.TRANSITION);
+        });
 
         if (disabled) {
           if (!t.disabled) {
@@ -1570,8 +1578,13 @@
             t.disabled = true;
             t.classList.add(CONSTANTS.SELECTORS.INTERACTION_DISABLED);
 
-            if (container) {
-              container.classList.add(CONSTANTS.SELECTORS.INPUT_DISABLED);
+            // Apply disabled style to outermost container for best visual effect
+            if (outerContainer) {
+              outerContainer.classList.add(CONSTANTS.SELECTORS.INPUT_DISABLED);
+            } else if (promptContainer) {
+              promptContainer.classList.add(CONSTANTS.SELECTORS.INPUT_DISABLED);
+            } else if (innerContainer) {
+              innerContainer.classList.add(CONSTANTS.SELECTORS.INPUT_DISABLED);
             }
           }
         } else {
@@ -1583,9 +1596,10 @@
             t.placeholder = t.dataset.originalPlaceholder || "";
             t.classList.remove(CONSTANTS.SELECTORS.INTERACTION_DISABLED);
 
-            if (container) {
-              container.classList.remove(CONSTANTS.SELECTORS.INPUT_DISABLED);
-            }
+            // Remove disabled style from all containers
+            [outerContainer, innerContainer, promptContainer].forEach((c) => {
+              if (c) c.classList.remove(CONSTANTS.SELECTORS.INPUT_DISABLED);
+            });
           }
         }
       });
