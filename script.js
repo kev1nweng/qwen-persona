@@ -59,6 +59,33 @@
 
   Debug.init();
 
+  // Wrap persona-specific console logs so they only print when debug is enabled.
+  // This avoids silencing other scripts while keeping persona logs gated by Debug.enabled.
+  (function () {
+    const origLog = console.log.bind(console);
+    const origWarn = console.warn.bind(console);
+    console.log = function (...args) {
+      try {
+        const first = args[0];
+        if (typeof first === "string" && first.startsWith("[QwenPersona]")) {
+          if (Debug.enabled) origLog(...args);
+          return;
+        }
+      } catch (e) {}
+      origLog(...args);
+    };
+    console.warn = function (...args) {
+      try {
+        const first = args[0];
+        if (typeof first === "string" && first.startsWith("[QwenPersona]")) {
+          if (Debug.enabled) origWarn(...args);
+          return;
+        }
+      } catch (e) {}
+      origWarn(...args);
+    };
+  })();
+
   // ==================== Constants & Configuration ====================
   const CONSTANTS = {
     STORAGE: {
@@ -175,6 +202,7 @@
         importFromUrl: "Import from URL",
         enterUrl: "Enter the URL of the persona configuration JSON:",
         importSuccess: "Personas imported successfully!",
+        nameRequired: "Please enter a Persona name",
         importError:
           "Failed to import personas. Please check the URL and JSON format.",
       },
@@ -207,6 +235,7 @@
         importFromUrl: "从 URL 导入",
         enterUrl: "请输入 Persona 配置 JSON 的 URL：",
         importSuccess: "Persona 导入成功！",
+        nameRequired: "请输入 Persona 名称",
         importError: "导入失败，请检查 URL 和 JSON 格式。",
       },
     },
@@ -2465,7 +2494,7 @@
       ).checked;
 
       if (!name) {
-        alert("请输入 Persona 名称");
+        alert(I18n.t("nameRequired"));
         return;
       }
 
