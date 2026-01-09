@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QwenPersona
 // @namespace    https://www.kev1nweng.space
-// @version      1764268716
+// @version      1767971427
 // @description  一个便于用户自定义、保存并同步 Qwen Chat 自定义角色的 Tampermonkey 脚本。A Tampermonkey script for customizing user-defined personas in Qwen Chat.
 // @author       小翁同学 (kev1nweng)
 // @license      AGPL-3.0
@@ -45,21 +45,25 @@
       // Qwen UI Elements
       HEADER_DESKTOP: ".header-desktop",
       HEADER_LEFT: ".header-desktop .header-content .header-left",
-      MODEL_SELECTOR: '[class*="index-module__web-model-selector"]',
-      MODEL_SELECTOR_CONTENT: '[class*="index-module__model-selector-content"]',
+      MODEL_SELECTOR: '[class*="index-module__model-selector-text"]',
+      MODEL_SELECTOR_TRIGGER: '.header-left .ant-dropdown-trigger',
+      MODEL_SELECTOR_CONTENT: '[class*="index-module__model-selector-text"]',
       MODEL_SELECTOR_DROPDOWN:
-        '[class*="index-module__model-selector-dropdown"]',
-      MODEL_SELECTOR_ITEM: '[class*="index-module__model-selector-item"]',
-      MODEL_NAME_TEXT: '[class*="index-module__model-name-text"]',
+        '[class*="index-module__model-selector-popup"]',
+      MODEL_SELECTOR_DROPDOWN_SECONDARY:
+        '[class*="index-module__model-selector-popup-secondary"]',
+      MODEL_SELECTOR_ITEM: '[class*="index-module__model-item___"]',
+      MODEL_NAME_TEXT: '[class*="index-module__model-item-name___"]',
       MODEL_SELECTOR_VIEW_MORE:
-        '[class*="index-module__model-selector-view-more"]',
-      MODEL_VIEW_MORE_TEXT: '[class*="index-module__view-more-text"]',
+        '[class*="index-module__view-more___"]',
+      MODEL_VIEW_MORE_TEXT: '[class*="index-module__view-more-text___"]',
       ANT_DROPDOWN_TRIGGER: ".ant-dropdown-trigger",
       CHAT_INPUT_FEATURE_BTN: ".chat-input-feature-btn",
       CHAT_INPUT_FEATURE_TEXT: ".chat-input-feature-btn-text",
+      DEEP_THINKING_CONTAINER: ".chat-message-input-thinking-budget-btn",
       WEB_SEARCH_BTN: "button.websearch_button",
-      TEXTAREA: "textarea",
-      INPUT_CONTAINER: ".chat-message-input-container-inner",
+      TEXTAREA: "textarea#chat-input, textarea.chat-input, textarea",
+      INPUT_CONTAINER: ".prompt-input-container, .chat-input-container, .chat-message-input-container-inner",
 
       // Classes
       TRIGGER_COLLAPSED: "collapsed",
@@ -291,7 +295,7 @@
                 position: relative;
                 display: flex;
                 align-items: center;
-                margin-left: 6px;
+                margin-right: 12px;
                 z-index: 100;
             }
 
@@ -876,11 +880,20 @@
             }
 
             /* Adjust model selector margin */
+            [class*="index-module__model-selector-text"],
             [class*="index-module__web-model-selector"] {
                 margin-left: 0;
             }
 
             /* Hide native model selector when agent is active */
+            body.persona-agent-active .header-left > .ant-dropdown-trigger {
+                display: none !important;
+            }
+
+            body.persona-agent-active [class*="index-module__model-selector-text"] {
+                display: none !important;
+            }
+
             body.persona-agent-active [class*="index-module__web-model-selector"] {
                 display: none !important;
             }
@@ -1514,14 +1527,21 @@
           headerLeft &&
           !document.getElementById(CONSTANTS.SELECTORS.CONTAINER)
         ) {
+          // Try to find the model selector trigger (new structure uses ant-dropdown-trigger)
+          const modelSelectorTrigger = headerLeft.querySelector(
+            CONSTANTS.SELECTORS.MODEL_SELECTOR_TRIGGER
+          );
           const modelSelector = headerLeft.querySelector(
             CONSTANTS.SELECTORS.MODEL_SELECTOR
           );
 
           const container = UI.createDropdownUI();
 
-          if (modelSelector) {
-            headerLeft.insertBefore(container, modelSelector);
+          // Insert before the model selector trigger or model selector text
+          if (modelSelectorTrigger) {
+            headerLeft.insertBefore(container, modelSelectorTrigger);
+          } else if (modelSelector) {
+            headerLeft.insertBefore(container, modelSelector.parentElement || modelSelector);
           } else {
             headerLeft.appendChild(container);
           }
@@ -1592,31 +1612,42 @@
             ${CONSTANTS.SELECTORS.MODEL_SELECTOR_DROPDOWN},
             .ant-dropdown,
             .ant-select-dropdown {
-                opacity: 0 !important;
-                pointer-events: none !important;
-                visibility: hidden !important;
-                display: none !important;
-                transition: none !important;
-                animation: none !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+            transition: none !important;
+            animation: none !important;
             }
         `;
       document.head.appendChild(hideStyle);
 
+      // Ensure the style has been applied before we open the dropdown.
+      // Without this, some browsers may show a 1-frame flash before the CSS takes effect.
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+
       try {
+        // Try to find the model selector trigger using multiple strategies
+        let modelTrigger = null;
+        
+        // Strategy 1: Find by model selector content
         const modelTriggerContent = document.querySelector(
           CONSTANTS.SELECTORS.MODEL_SELECTOR_CONTENT
         );
-
-        if (!modelTriggerContent) {
-          console.warn(
-            "[QwenPersona] Model selector trigger content not found"
+        if (modelTriggerContent) {
+          modelTrigger = modelTriggerContent.closest(
+            CONSTANTS.SELECTORS.ANT_DROPDOWN_TRIGGER
           );
-          return false;
         }
-
-        const modelTrigger = modelTriggerContent.closest(
-          CONSTANTS.SELECTORS.ANT_DROPDOWN_TRIGGER
-        );
+        
+        // Strategy 2: Find by header-left trigger directly
+        if (!modelTrigger) {
+          const headerLeft = document.querySelector(CONSTANTS.SELECTORS.HEADER_LEFT);
+          if (headerLeft) {
+            modelTrigger = headerLeft.querySelector(
+              CONSTANTS.SELECTORS.MODEL_SELECTOR_TRIGGER
+            );
+          }
+        }
 
         if (!modelTrigger) {
           console.warn("[QwenPersona] Model selector trigger not found");
@@ -1626,16 +1657,44 @@
         modelTrigger.click();
         console.log("[QwenPersona] Clicked model selector trigger");
 
+        const findModelInOpenDropdowns = () => {
+          // AntD dropdowns are typically rendered in portals under body.
+          // We search all open dropdown containers to catch both primary and secondary menus.
+          const candidates = Array.from(document.querySelectorAll(".ant-dropdown"));
+          for (const el of candidates) {
+            if (!el.querySelector(CONSTANTS.SELECTORS.MODEL_SELECTOR_ITEM)) continue;
+            const btn = ModelManager.findModelButton(el, modelId);
+            if (btn) return btn;
+          }
+
+          // Fallback: directly search all model selector popups if the container class differs.
+          const popups = Array.from(
+            document.querySelectorAll(CONSTANTS.SELECTORS.MODEL_SELECTOR_DROPDOWN)
+          );
+          for (const popup of popups) {
+            if (!popup.querySelector(CONSTANTS.SELECTORS.MODEL_SELECTOR_ITEM)) continue;
+            const btn = ModelManager.findModelButton(popup, modelId);
+            if (btn) return btn;
+          }
+
+          return null;
+        };
+
         const menuSelector = CONSTANTS.SELECTORS.MODEL_SELECTOR_DROPDOWN;
         let menu = await Utils.waitForElement(menuSelector, 2000);
         if (!menu) {
-          console.warn("[QwenPersona] Model selector menu not found");
-          return false;
+          // Also try .ant-dropdown as fallback
+          menu = await Utils.waitForElement('.ant-dropdown', 1000);
+          if (!menu) {
+            console.warn("[QwenPersona] Model selector menu not found");
+            return false;
+          }
         }
 
-        let modelButton = ModelManager.findModelButton(menu, modelId);
+        let modelButton = ModelManager.findModelButton(menu, modelId) || findModelInOpenDropdowns();
 
         if (!modelButton) {
+          // Look for the "展开更多模型" button which opens a secondary dropdown
           const expandBtn = menu.querySelector(
             CONSTANTS.SELECTORS.MODEL_SELECTOR_VIEW_MORE
           );
@@ -1645,19 +1704,54 @@
             const textEl = expandBtn.querySelector(
               CONSTANTS.SELECTORS.MODEL_VIEW_MORE_TEXT
             );
-            const text = textEl ? textEl.textContent : "";
+            const text = textEl ? textEl.textContent : expandBtn.textContent || "";
 
-            const isExpanded = text.includes("折叠");
+            const isExpanded = text.includes("折叠") || text.includes("收起");
             console.log("[QwenPersona] Menu expanded state:", isExpanded);
 
             if (!isExpanded) {
-              console.log("[QwenPersona] Clicking expand button...");
-              expandBtn.click();
-              await Utils.sleep(400);
+              console.log("[QwenPersona] Hovering over expand button to trigger secondary menu...");
+              
+              // The "展开更多模型" button triggers a secondary dropdown on hover/click
+              // It's wrapped in an ant-dropdown-trigger
+              const triggerWrapper = expandBtn.closest('.ant-dropdown-trigger') || expandBtn;
+              
+              // Trigger hover-based submenu (some builds require mouseover/mousemove).
+              triggerWrapper.dispatchEvent(
+                new MouseEvent("mouseenter", { bubbles: true })
+              );
+              triggerWrapper.dispatchEvent(
+                new MouseEvent("mouseover", { bubbles: true })
+              );
+              triggerWrapper.dispatchEvent(
+                new MouseEvent("mousemove", { bubbles: true })
+              );
+              await Utils.sleep(250);
 
-              menu = document.querySelector(menuSelector);
-              if (menu) {
-                modelButton = ModelManager.findModelButton(menu, modelId);
+              // Also click as a fallback (some builds open on click).
+              triggerWrapper.click();
+
+              // Wait briefly for the secondary dropdown to mount.
+              await Utils.waitForElement(
+                CONSTANTS.SELECTORS.MODEL_SELECTOR_DROPDOWN_SECONDARY,
+                1200
+              );
+              await Utils.sleep(200);
+
+              // Prefer searching the secondary menu first if present.
+              const secondaryMenu = document.querySelector(
+                CONSTANTS.SELECTORS.MODEL_SELECTOR_DROPDOWN_SECONDARY
+              );
+              if (secondaryMenu) {
+                console.log(
+                  "[QwenPersona] Found secondary menu, searching for model..."
+                );
+                modelButton = ModelManager.findModelButton(secondaryMenu, modelId);
+              }
+
+              // Robust fallback: search across all open dropdowns/popups.
+              if (!modelButton) {
+                modelButton = findModelInOpenDropdowns();
               }
             }
           } else {
@@ -1668,12 +1762,12 @@
         if (modelButton) {
           const itemContainer = modelButton.closest(
             CONSTANTS.SELECTORS.MODEL_SELECTOR_ITEM
-          );
+          ) || modelButton;
 
           if (
             itemContainer &&
             Array.from(itemContainer.classList).some((c) =>
-              c.includes("index-module__model-selector-item-selected")
+              c.includes("model-item-selected") || c.includes("model-selector-item-selected")
             )
           ) {
             console.log("[QwenPersona] Model already selected:", modelId);
@@ -1712,13 +1806,37 @@
         "items"
       );
 
-      const normalizedId = modelId.toLowerCase().replace(/[-_]/g, "");
+      const normalize = (s) =>
+        (s || "")
+          .toLowerCase()
+          .normalize("NFKC")
+          .replace(/\s+/g, "")
+          // Keep only a-z and 0-9 to ignore punctuation like '-', '.', '_' etc.
+          .replace(/[^a-z0-9]/g, "");
+
+      const normalizedId = normalize(modelId);
 
       for (const item of modelItems) {
-        const nameEl = item.querySelector(CONSTANTS.SELECTORS.MODEL_NAME_TEXT);
+        // Try multiple selectors for model name text
+        let nameEl = item.querySelector(CONSTANTS.SELECTORS.MODEL_NAME_TEXT);
+        if (!nameEl) {
+          // Fallback: look for any text element within the item
+          nameEl = item.querySelector('[class*="model-item-name"]') || 
+                   item.querySelector('[class*="model-name"]') ||
+                   item.querySelector('[class*="model-selector-item-name"]');
+        }
+        
+        // Get text from the first span child if present, otherwise use textContent
+        let modelName = '';
         if (nameEl) {
-          const modelName = nameEl.textContent.trim();
-          const normalizedName = modelName.toLowerCase().replace(/[-_]/g, "");
+          const spanEl = nameEl.querySelector('span');
+          modelName = spanEl ? spanEl.textContent.trim() : nameEl.textContent.trim();
+        } else {
+          modelName = item.textContent.trim();
+        }
+
+        if (modelName) {
+          const normalizedName = normalize(modelName);
 
           if (normalizedName === normalizedId) {
             console.log("[QwenPersona] Found exact match:", modelName);
@@ -1736,9 +1854,22 @@
       }
 
       for (const item of modelItems) {
-        const nameEl = item.querySelector(CONSTANTS.SELECTORS.MODEL_NAME_TEXT);
+        let nameEl = item.querySelector(CONSTANTS.SELECTORS.MODEL_NAME_TEXT);
+        if (!nameEl) {
+          nameEl = item.querySelector('[class*="model-item-name"]') || 
+                   item.querySelector('[class*="model-name"]') ||
+                   item.querySelector('[class*="model-selector-item-name"]');
+        }
+        
+        let modelName = '';
         if (nameEl) {
-          const modelName = nameEl.textContent.trim();
+          const spanEl = nameEl.querySelector('span');
+          modelName = spanEl ? spanEl.textContent.trim() : nameEl.textContent.trim();
+        } else {
+          modelName = item.textContent.trim();
+        }
+
+        if (modelName) {
           const mainPart = modelId
             .split("-")
             .slice(0, 2)
@@ -1789,6 +1920,17 @@
   // ==================== Feature Service ====================
   const FeatureManager = {
     findDeepThinkingButton() {
+      // First try to find within the new container structure
+      const thinkingContainer = document.querySelector(
+        CONSTANTS.SELECTORS.DEEP_THINKING_CONTAINER
+      );
+      if (thinkingContainer) {
+        const btn = thinkingContainer.querySelector(
+          CONSTANTS.SELECTORS.CHAT_INPUT_FEATURE_BTN
+        );
+        if (btn) return btn;
+      }
+
       const buttons = document.querySelectorAll(
         CONSTANTS.SELECTORS.CHAT_INPUT_FEATURE_BTN
       );
@@ -1800,7 +1942,15 @@
         ) {
           return btn;
         }
+        if (use &&
+          use.getAttribute("xlink:href")?.includes("icon-fill-deepthink-01")
+        ) {
+          return btn;
+        }
         if (btn.querySelector(".icon-line-deepthink-01")) {
+          return btn;
+        }
+        if (btn.querySelector(".icon-fill-deepthink-01")) {
           return btn;
         }
       }
@@ -1852,24 +2002,50 @@
     isFeatureButtonActive(button) {
       if (!button) return false;
 
+      // Check for common active states
       if (button.classList.contains("active")) return true;
+      if (button.classList.contains("checked")) return true;
       if (button.getAttribute("aria-pressed") === "true") return true;
       if (button.dataset.state === "active" || button.dataset.state === "on")
         return true;
+
+      // Check for disabled state (web search is disabled when deep thinking is active)
+      if (button.classList.contains("disabled")) return false;
+
+      // Check for fill icons (filled = active state)
+      const use = button.querySelector("use");
+      if (use) {
+        const href = use.getAttribute("xlink:href") || "";
+        if (href.includes("icon-fill-deepthink")) return true;
+        if (href.includes("icon-fill-globe")) return true;
+      }
 
       const icon = button.querySelector('i[class*="icon-"]');
       if (icon && icon.classList.contains("icon-fill-deepthink-01"))
         return true;
       if (icon && icon.classList.contains("icon-fill-globe-01")) return true;
 
+      // Check SVG icon within
+      const svg = button.querySelector("svg use");
+      if (svg) {
+        const href = svg.getAttribute("xlink:href") || "";
+        if (href.includes("fill")) return true;
+      }
+
+      // Check background color for active state
       const style = window.getComputedStyle(button);
       const bgColor = style.backgroundColor;
       if (
         bgColor &&
         bgColor !== "rgba(0, 0, 0, 0)" &&
-        bgColor !== "transparent"
+        bgColor !== "transparent" &&
+        bgColor !== "rgb(255, 255, 255)"
       ) {
-        // Active
+        // Has a background color, might be active
+        // Check if it matches the brand color pattern
+        if (bgColor.includes("97") || bgColor.includes("92") || bgColor.includes("237")) {
+          return true;
+        }
       }
 
       return false;
