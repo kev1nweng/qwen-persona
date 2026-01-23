@@ -2827,7 +2827,9 @@
                 }
               }
 
-              if (persona.prompt && Array.isArray(body.messages)) {
+              // Only inject system prompt if it's a new chat or if a system message is already present in the request.
+              // Re-injecting system prompts on follow-up turns in an existing chat causes "no more than one system message" error.
+              if (persona.prompt && Array.isArray(body.messages) && (isNewChat || hasSystemMessage)) {
                 // Always upsert a system message at messages[0] with persona prompt and metadata.
                 // This is more explicit and increases the chance the backend will honor the persona.
                 const systemMsgIndex = body.messages.findIndex((m) => m.role === "system");
