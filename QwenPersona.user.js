@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QwenPersona
 // @namespace    https://www.kev1nweng.space
-// @version      1769111004
+// @version      1769138683
 // @description  一个便于用户自定义、保存并同步 Qwen Chat 自定义角色的 Tampermonkey 脚本。A Tampermonkey script for customizing user-defined personas in Qwen Chat.
 // @author       小翁同学 (kev1nweng)
 // @license      AGPL-3.0
@@ -2840,7 +2840,9 @@
                 }
               }
 
-              if (persona.prompt && Array.isArray(body.messages)) {
+              // Only inject system prompt if it's a new chat or if a system message is already present in the request.
+              // Re-injecting system prompts on follow-up turns in an existing chat causes "no more than one system message" error.
+              if (persona.prompt && Array.isArray(body.messages) && (isNewChat || hasSystemMessage)) {
                 // Always upsert a system message at messages[0] with persona prompt and metadata.
                 // This is more explicit and increases the chance the backend will honor the persona.
                 const systemMsgIndex = body.messages.findIndex((m) => m.role === "system");
