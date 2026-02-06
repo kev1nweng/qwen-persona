@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QwenPersona
 // @namespace    https://www.kev1nweng.space
-// @version      1769138683
+// @version      1770408471
 // @description  一个便于用户自定义、保存并同步 Qwen Chat 自定义角色的 Tampermonkey 脚本。A Tampermonkey script for customizing user-defined personas in Qwen Chat.
 // @author       小翁同学 (kev1nweng)
 // @license      AGPL-3.0
@@ -132,26 +132,25 @@
       HEADER_DESKTOP: ".header-desktop",
       HEADER_LEFT: ".header-desktop .header-content .header-left",
       MODEL_SELECTOR: '[class*="index-module__model-selector-text"]',
-      MODEL_SELECTOR_TRIGGER: '.header-left .ant-dropdown-trigger',
+      MODEL_SELECTOR_TRIGGER: ".header-left .ant-dropdown-trigger",
       MODEL_SELECTOR_CONTENT: '[class*="index-module__model-selector-text"]',
-      MODEL_SELECTOR_DROPDOWN:
-        '[class*="index-module__model-selector-popup"]',
+      MODEL_SELECTOR_DROPDOWN: '[class*="index-module__model-selector-popup"]',
       MODEL_SELECTOR_DROPDOWN_SECONDARY:
         '[class*="index-module__model-selector-popup-secondary"]',
       MODEL_SELECTOR_ITEM: '[class*="index-module__model-item___"]',
       MODEL_NAME_TEXT: '[class*="index-module__model-item-name___"]',
-      MODEL_SELECTOR_VIEW_MORE:
-        '[class*="index-module__view-more___"]',
+      MODEL_SELECTOR_VIEW_MORE: '[class*="index-module__view-more___"]',
       MODEL_VIEW_MORE_TEXT: '[class*="index-module__view-more-text___"]',
       ANT_DROPDOWN_TRIGGER: ".ant-dropdown-trigger",
       CHAT_INPUT_FEATURE_BTN: ".chat-input-feature-btn",
       CHAT_INPUT_FEATURE_TEXT: ".chat-input-feature-btn-text",
-      DEEP_THINKING_CONTAINER: ".chat-message-input-thinking-budget-btn",
-      WEB_SEARCH_BTN: "button.websearch_button",
-      TEXTAREA: "textarea#chat-input, textarea.chat-input, textarea",
-      INPUT_CONTAINER: ".prompt-input-container, .chat-input-container, .chat-message-input-container-inner",
-      CHAT_MESSAGE_INPUT: ".chat-message-input, #chat-message-input",
-      CHAT_PROMPT_INPUT_CONTAINER: ".chat-prompt-input-container, .chat-prompt-input",
+      DEEP_THINKING_CONTAINER: ".thinking-button",
+      WEB_SEARCH_BTN: null, // Search button removed in new UI
+      TEXTAREA: ".message-input-textarea",
+      INPUT_CONTAINER: ".message-input-container-area",
+      CHAT_MESSAGE_INPUT: ".message-input-container",
+      CHAT_PROMPT_INPUT_CONTAINER:
+        ".chat-prompt-input-container, .chat-prompt-input",
 
       // Classes
       TRIGGER_COLLAPSED: "collapsed",
@@ -208,9 +207,14 @@
           "This prompt will be injected as a system message, overriding default prompts.",
         features: "Features",
         deepThinking: "Deep Thinking",
+        deepThinkingDisabled: "Default Disabled",
+        deepThinkingEnabled: "Auto Enabled",
         webSearch: "Web Search",
+        webSearchDisabled: "Disable",
+        webSearchEnabled: "Enable",
+        webSearchAuto: "Auto (Let AI decide)",
         featuresHint:
-          "Enabled features will be automatically activated for each chat.",
+          "Enabled features will be automatically activated for each chat. Web search is controlled via system prompt injection.",
         cancel: "Cancel",
         save: "Save",
         deleteConfirm: "Are you sure you want to delete this Persona?",
@@ -242,8 +246,14 @@
         promptHint: "此提示词将作为系统消息注入到对话中，优先于默认系统提示",
         features: "增强功能",
         deepThinking: "深度思考",
+        deepThinkingDisabled: "默认禁用",
+        deepThinkingEnabled: "自动启用",
         webSearch: "联网搜索",
-        featuresHint: "启用后将在每次对话时自动开启对应功能",
+        webSearchDisabled: "禁止使用",
+        webSearchEnabled: "强制开启",
+        webSearchAuto: "自动 (由 AI 判断)",
+        featuresHint:
+          "启用后将在每次对话时自动开启对应功能。联网搜索通过在提示词中注入指令控制。",
         cancel: "取消",
         save: "保存",
         deleteConfirm: "确定要删除这个 Persona 吗？",
@@ -325,7 +335,20 @@
     loadPersonas() {
       try {
         const stored = localStorage.getItem(CONSTANTS.STORAGE.PERSONAS);
-        State.personas = stored ? JSON.parse(stored) : [];
+        let personas = stored ? JSON.parse(stored) : [];
+
+        // Migrate old personas (boolean webSearch -> string webSearch)
+        personas = personas.map((p) => {
+          if (typeof p.webSearch === "boolean") {
+            p.webSearch = p.webSearch ? "enabled" : "auto";
+          }
+          if (typeof p.deepThinking === "boolean") {
+            p.deepThinking = p.deepThinking ? "enabled" : "disabled";
+          }
+          return p;
+        });
+
+        State.personas = personas;
       } catch (e) {
         console.error("[QwenPersona] Failed to load personas:", e);
         State.personas = [];
@@ -336,7 +359,7 @@
       try {
         localStorage.setItem(
           CONSTANTS.STORAGE.PERSONAS,
-          JSON.stringify(State.personas)
+          JSON.stringify(State.personas),
         );
       } catch (e) {
         console.error("[QwenPersona] Failed to save personas:", e);
@@ -357,7 +380,7 @@
         if (State.selectedPersonaId) {
           localStorage.setItem(
             CONSTANTS.STORAGE.SELECTED,
-            State.selectedPersonaId
+            State.selectedPersonaId,
           );
         } else {
           localStorage.removeItem(CONSTANTS.STORAGE.SELECTED);
@@ -373,7 +396,15 @@
         State.chatPersonaMap = stored ? JSON.parse(stored) : {};
 
         // Cleanup any pseudo-IDs that might have leaked into the map
-        const pseudoNames = ["new", "new-chat", "start", "create", "home", "null", "undefined"];
+        const pseudoNames = [
+          "new",
+          "new-chat",
+          "start",
+          "create",
+          "home",
+          "null",
+          "undefined",
+        ];
         let changed = false;
         pseudoNames.forEach((id) => {
           if (State.chatPersonaMap[id]) {
@@ -391,7 +422,7 @@
       try {
         localStorage.setItem(
           CONSTANTS.STORAGE.CHAT_MAP,
-          JSON.stringify(State.chatPersonaMap)
+          JSON.stringify(State.chatPersonaMap),
         );
       } catch (e) {
         console.error("[QwenPersona] Failed to save chat persona map:", e);
@@ -411,7 +442,7 @@
       try {
         localStorage.setItem(
           CONSTANTS.STORAGE.CHAT_INJECTED,
-          JSON.stringify(State.chatInjectedMap)
+          JSON.stringify(State.chatInjectedMap),
         );
       } catch (e) {
         console.error("[QwenPersona] Failed to save chat injected map:", e);
@@ -1105,6 +1136,50 @@
                 --input-font-color: #e0e2eb;
                 --button-hover-background: #2a2a2a;
             }
+
+            /* Segmented Control Styles */
+            .persona-segmented-control {
+                display: flex;
+                background: var(--container-secondary-fill, #f7f8fc);
+                border-radius: 12px;
+                padding: 4px;
+                gap: 4px;
+                border: 1px solid var(--line-secondary-border, #e0e2eb);
+            }
+
+            .persona-segment {
+                flex: 1;
+                padding: 8px;
+                text-align: center;
+                font-size: 13px;
+                font-weight: 500;
+                color: var(--character-tertiary-text, #8f91a8);
+                cursor: pointer;
+                border-radius: 8px;
+                transition: all 0.2s ease;
+                user-select: none;
+            }
+
+            .persona-segment:hover {
+                color: var(--character-primary-text, #2c2c36);
+                background: rgba(0, 0, 0, 0.05);
+            }
+
+            .persona-segment.active {
+                background: var(--container-primary-fill, #fff);
+                color: var(--btn-brandprimary-fill, #615ced);
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            }
+
+            html.dark .persona-segmented-control {
+                background: #1a1a1a;
+                border-color: #444;
+            }
+
+            html.dark .persona-segment.active {
+                background: #333;
+                color: #8c88ff;
+            }
       `;
       document.head.appendChild(style);
     },
@@ -1158,7 +1233,7 @@
 
       let html = `
             <div class="persona-dropdown-header">${I18n.t(
-              "selectPersona"
+              "selectPersona",
             )}</div>
             <div class="persona-dropdown-list">
                 <div class="persona-dropdown-item ${
@@ -1169,10 +1244,10 @@
                     <div class="persona-dropdown-item-icon">🚫</div>
                     <div class="persona-dropdown-item-content">
                         <div class="persona-dropdown-item-name">${I18n.t(
-                          "noPersona"
+                          "noPersona",
                         )}</div>
                         <div class="persona-dropdown-item-model">${I18n.t(
-                          "useDefaultSettings"
+                          "useDefaultSettings",
                         )}</div>
                     </div>
                 </div>
@@ -1180,17 +1255,22 @@
 
       State.personas.forEach((persona) => {
         let featureBadges = "";
-        if (persona.deepThinking || persona.webSearch) {
+        const hasWebSearch =
+          persona.webSearch && persona.webSearch !== "disabled";
+        const isDeepThinking = persona.deepThinking === "enabled";
+        if (isDeepThinking || hasWebSearch) {
           featureBadges = '<div class="persona-dropdown-item-features">';
-          if (persona.deepThinking) {
+          if (isDeepThinking) {
             featureBadges += `<span class="persona-feature-badge active">${I18n.t(
-              "deepThinking"
+              "deepThinking",
             )}</span>`;
           }
-          if (persona.webSearch) {
-            featureBadges += `<span class="persona-feature-badge active">${I18n.t(
-              "webSearch"
-            )}</span>`;
+          if (hasWebSearch) {
+            const label =
+              persona.webSearch === "auto"
+                ? `${I18n.t("webSearch")}(Auto)`
+                : I18n.t("webSearch");
+            featureBadges += `<span class="persona-feature-badge active">${label}</span>`;
           }
           featureBadges += "</div>";
         }
@@ -1206,12 +1286,12 @@
                     }</div>
                     <div class="persona-dropdown-item-content">
                         <div class="persona-dropdown-item-name">${Utils.escapeHtml(
-                          persona.name
+                          persona.name,
                         )}</div>
                         <div class="persona-dropdown-item-model">${Utils.escapeHtml(
                           persona.modelName ||
                             persona.model ||
-                            I18n.t("defaultModel")
+                            I18n.t("defaultModel"),
                         )}</div>
                         ${featureBadges}
                     </div>
@@ -1322,7 +1402,7 @@
       if (!trigger) return;
 
       const selectedPersona = State.personas.find(
-        (p) => p.id === State.selectedPersonaId
+        (p) => p.id === State.selectedPersonaId,
       );
       const iconSpan = trigger.querySelector(".persona-trigger-icon");
       const textSpan = trigger.querySelector(".persona-trigger-text");
@@ -1390,7 +1470,7 @@
             <div class="persona-modal-body">
                 <div class="persona-form-group">
                     <label class="persona-form-label">${I18n.t(
-                      "personaName"
+                      "personaName",
                     )}</label>
                     <input type="text" class="persona-form-input" id="${
                       CONSTANTS.SELECTORS.INPUT_NAME
@@ -1426,56 +1506,63 @@
                 </div>
                 <div class="persona-form-group">
                     <label class="persona-form-label">${I18n.t(
-                      "systemPrompt"
+                      "systemPrompt",
                     )}</label>
                     <textarea class="persona-form-input persona-form-textarea" id="${
                       CONSTANTS.SELECTORS.INPUT_PROMPT
                     }"
                               placeholder="${I18n.t("promptPlaceholder")}">${
-        persona ? Utils.escapeHtml(persona.prompt) : ""
-      }</textarea>
+                                persona ? Utils.escapeHtml(persona.prompt) : ""
+                              }</textarea>
                     <div class="persona-form-hint">${I18n.t("promptHint")}</div>
                 </div>
                 <div class="persona-form-group">
                     <label class="persona-form-label">${I18n.t(
-                      "features"
+                      "deepThinking",
                     )}</label>
-                    <div class="persona-form-checkbox-group">
-                        <label class="persona-form-checkbox-item">
-                            <input type="checkbox" class="persona-form-checkbox" id="${
-                              CONSTANTS.SELECTORS.INPUT_DEEP_THINKING
-                            }"
-                                   ${
-                                     persona && persona.deepThinking
-                                       ? "checked"
-                                       : ""
-                                   }>
-                            <span class="persona-form-checkbox-label">${I18n.t(
-                              "deepThinking"
-                            )}</span>
-                        </label>
-                        <label class="persona-form-checkbox-item">
-                            <input type="checkbox" class="persona-form-checkbox" id="${
-                              CONSTANTS.SELECTORS.INPUT_WEB_SEARCH
-                            }"
-                                   ${
-                                     persona && persona.webSearch
-                                       ? "checked"
-                                       : ""
-                                   }>
-                            <span class="persona-form-checkbox-label">${I18n.t(
-                              "webSearch"
-                            )}</span>
-                        </label>
+                    <div class="persona-segmented-control" id="deep-thinking-segmented">
+                        <div class="persona-segment ${
+                          !persona || persona.deepThinking !== "enabled"
+                            ? "active"
+                            : ""
+                        }" data-value="disabled">${I18n.t("deepThinkingDisabled")}</div>
+                        <div class="persona-segment ${
+                          persona && persona.deepThinking === "enabled"
+                            ? "active"
+                            : ""
+                        }" data-value="enabled">${I18n.t("deepThinkingEnabled")}</div>
+                        <input type="hidden" id="${
+                          CONSTANTS.SELECTORS.INPUT_DEEP_THINKING
+                        }" value="${persona ? (persona.deepThinking === "enabled" ? "enabled" : "disabled") : "disabled"}">
                     </div>
-                    <div class="persona-form-hint">${I18n.t(
-                      "featuresHint"
-                    )}</div>
+                </div>
+                <div class="persona-form-group">
+                    <label class="persona-form-label">${I18n.t("webSearch")}</label>
+                    <div class="persona-segmented-control" id="web-search-segmented">
+                        <div class="persona-segment ${
+                          persona && persona.webSearch === "disabled"
+                            ? "active"
+                            : ""
+                        }" data-value="disabled">${I18n.t("webSearchDisabled")}</div>
+                        <div class="persona-segment ${
+                          !persona || persona.webSearch === "auto"
+                            ? "active"
+                            : ""
+                        }" data-value="auto">${I18n.t("webSearchAuto")}</div>
+                        <div class="persona-segment ${
+                          persona && persona.webSearch === "enabled"
+                            ? "active"
+                            : ""
+                        }" data-value="enabled">${I18n.t("webSearchEnabled")}</div>
+                        <input type="hidden" id="${
+                          CONSTANTS.SELECTORS.INPUT_WEB_SEARCH
+                        }" value="${persona ? persona.webSearch || "auto" : "auto"}">
+                    </div>
                 </div>
             </div>
             <div class="persona-modal-footer">
                 <button class="persona-btn persona-btn-secondary" onclick="window.personaManager.closeModal()">${I18n.t(
-                  "cancel"
+                  "cancel",
                 )}</button>
                 <button class="persona-btn persona-btn-primary" id="${
                   CONSTANTS.SELECTORS.SAVE_BTN
@@ -1483,13 +1570,38 @@
             </div>
         `;
 
+      // Segmented Control Logic
+      const setupSegmented = (id, inputId) => {
+        const container = document.getElementById(id);
+        if (container) {
+          const segments = container.querySelectorAll(".persona-segment");
+          const hiddenInput = document.getElementById(inputId);
+          segments.forEach((seg) => {
+            seg.onclick = () => {
+              segments.forEach((s) => s.classList.remove("active"));
+              seg.classList.add("active");
+              hiddenInput.value = seg.dataset.value;
+            };
+          });
+        }
+      };
+
+      setupSegmented(
+        "deep-thinking-segmented",
+        CONSTANTS.SELECTORS.INPUT_DEEP_THINKING,
+      );
+      setupSegmented(
+        "web-search-segmented",
+        CONSTANTS.SELECTORS.INPUT_WEB_SEARCH,
+      );
+
       // Emoji Picker Logic
       const emojiBtn = document.getElementById("persona-emoji-trigger-btn");
       const emojiInput = document.getElementById(
-        CONSTANTS.SELECTORS.INPUT_EMOJI
+        CONSTANTS.SELECTORS.INPUT_EMOJI,
       );
       const emojiPickerContainer = document.getElementById(
-        "persona-emoji-picker"
+        "persona-emoji-picker",
       );
       const emojiPicker = emojiPickerContainer
         ? emojiPickerContainer.querySelector("emoji-picker")
@@ -1550,7 +1662,7 @@
         if (arrow) arrow.classList.add(CONSTANTS.SELECTORS.ARROW_OPEN);
         console.log(
           "[QwenPersona] Dropdown opened, menu classes:",
-          menu.className
+          menu.className,
         );
       } else {
         if (!State.selectedPersonaId) {
@@ -1581,7 +1693,7 @@
       UI.closeDropdown();
       UI.renderModal(persona);
       const overlay = document.getElementById(
-        CONSTANTS.SELECTORS.MODAL_OVERLAY
+        CONSTANTS.SELECTORS.MODAL_OVERLAY,
       );
       if (overlay) {
         overlay.classList.add(CONSTANTS.SELECTORS.MENU_VISIBLE);
@@ -1591,7 +1703,7 @@
 
     closeModal() {
       const overlay = document.getElementById(
-        CONSTANTS.SELECTORS.MODAL_OVERLAY
+        CONSTANTS.SELECTORS.MODAL_OVERLAY,
       );
       if (overlay) {
         overlay.classList.remove(CONSTANTS.SELECTORS.MENU_VISIBLE);
@@ -1602,7 +1714,7 @@
 
     setInteractionState(disabled) {
       const personaTrigger = document.getElementById(
-        CONSTANTS.SELECTORS.TRIGGER
+        CONSTANTS.SELECTORS.TRIGGER,
       );
       if (personaTrigger) {
         if (disabled) {
@@ -1615,12 +1727,16 @@
       const textareas = document.querySelectorAll(CONSTANTS.SELECTORS.TEXTAREA);
       textareas.forEach((t) => {
         // Find the outermost chat-message-input container for visual effect
-        const outerContainer = t.closest(CONSTANTS.SELECTORS.CHAT_MESSAGE_INPUT);
+        const outerContainer = t.closest(
+          CONSTANTS.SELECTORS.CHAT_MESSAGE_INPUT,
+        );
         // Also find the inner container for additional styling
         const innerContainer =
           t.closest(CONSTANTS.SELECTORS.INPUT_CONTAINER) || t.parentElement;
         // Find the prompt input container as well
-        const promptContainer = t.closest(CONSTANTS.SELECTORS.CHAT_PROMPT_INPUT_CONTAINER);
+        const promptContainer = t.closest(
+          CONSTANTS.SELECTORS.CHAT_PROMPT_INPUT_CONTAINER,
+        );
 
         // Add transition class to all containers
         [outerContainer, innerContainer, promptContainer].forEach((c) => {
@@ -1667,7 +1783,7 @@
 
       const checkNavbar = () => {
         const headerLeft = document.querySelector(
-          CONSTANTS.SELECTORS.HEADER_LEFT
+          CONSTANTS.SELECTORS.HEADER_LEFT,
         );
 
         if (
@@ -1676,10 +1792,10 @@
         ) {
           // Try to find the model selector trigger (new structure uses ant-dropdown-trigger)
           const modelSelectorTrigger = headerLeft.querySelector(
-            CONSTANTS.SELECTORS.MODEL_SELECTOR_TRIGGER
+            CONSTANTS.SELECTORS.MODEL_SELECTOR_TRIGGER,
           );
           const modelSelector = headerLeft.querySelector(
-            CONSTANTS.SELECTORS.MODEL_SELECTOR
+            CONSTANTS.SELECTORS.MODEL_SELECTOR,
           );
 
           const container = UI.createDropdownUI();
@@ -1688,7 +1804,10 @@
           if (modelSelectorTrigger) {
             headerLeft.insertBefore(container, modelSelectorTrigger);
           } else if (modelSelector) {
-            headerLeft.insertBefore(container, modelSelector.parentElement || modelSelector);
+            headerLeft.insertBefore(
+              container,
+              modelSelector.parentElement || modelSelector,
+            );
           } else {
             headerLeft.appendChild(container);
           }
@@ -1707,7 +1826,7 @@
           console.warn(
             "[QwenPersona] Failed to find navbar after",
             maxAttempts,
-            "attempts"
+            "attempts",
           );
         }
       };
@@ -1716,12 +1835,12 @@
     },
 
     startMessageObserver() {
-        // Deprecated: previous releases used a MutationObserver to remove
-        // plaintext markers like "[System Instruction]" from rendered messages.
-        // With explicit system-message injection we no longer need this DOM
-        // rewriting. Keep a no-op here to avoid changing the public API.
-        if (this.messageObserver) return;
-        this.messageObserver = null;
+      // Deprecated: previous releases used a MutationObserver to remove
+      // plaintext markers like "[System Instruction]" from rendered messages.
+      // With explicit system-message injection we no longer need this DOM
+      // rewriting. Keep a no-op here to avoid changing the public API.
+      if (this.messageObserver) return;
+      this.messageObserver = null;
     },
   };
 
@@ -1741,11 +1860,11 @@
           State.availableModels = data.data || data || [];
           localStorage.setItem(
             CONSTANTS.STORAGE.MODELS_CACHE,
-            JSON.stringify(State.availableModels)
+            JSON.stringify(State.availableModels),
           );
           console.log(
             "[QwenPersona] Models loaded:",
-            State.availableModels.length
+            State.availableModels.length,
           );
         }
       } catch (e) {
@@ -1784,23 +1903,25 @@
       try {
         // Try to find the model selector trigger using multiple strategies
         let modelTrigger = null;
-        
+
         // Strategy 1: Find by model selector content
         const modelTriggerContent = document.querySelector(
-          CONSTANTS.SELECTORS.MODEL_SELECTOR_CONTENT
+          CONSTANTS.SELECTORS.MODEL_SELECTOR_CONTENT,
         );
         if (modelTriggerContent) {
           modelTrigger = modelTriggerContent.closest(
-            CONSTANTS.SELECTORS.ANT_DROPDOWN_TRIGGER
+            CONSTANTS.SELECTORS.ANT_DROPDOWN_TRIGGER,
           );
         }
-        
+
         // Strategy 2: Find by header-left trigger directly
         if (!modelTrigger) {
-          const headerLeft = document.querySelector(CONSTANTS.SELECTORS.HEADER_LEFT);
+          const headerLeft = document.querySelector(
+            CONSTANTS.SELECTORS.HEADER_LEFT,
+          );
           if (headerLeft) {
             modelTrigger = headerLeft.querySelector(
-              CONSTANTS.SELECTORS.MODEL_SELECTOR_TRIGGER
+              CONSTANTS.SELECTORS.MODEL_SELECTOR_TRIGGER,
             );
           }
         }
@@ -1816,19 +1937,25 @@
         const findModelInOpenDropdowns = () => {
           // AntD dropdowns are typically rendered in portals under body.
           // We search all open dropdown containers to catch both primary and secondary menus.
-          const candidates = Array.from(document.querySelectorAll(".ant-dropdown"));
+          const candidates = Array.from(
+            document.querySelectorAll(".ant-dropdown"),
+          );
           for (const el of candidates) {
-            if (!el.querySelector(CONSTANTS.SELECTORS.MODEL_SELECTOR_ITEM)) continue;
+            if (!el.querySelector(CONSTANTS.SELECTORS.MODEL_SELECTOR_ITEM))
+              continue;
             const btn = ModelManager.findModelButton(el, modelId);
             if (btn) return btn;
           }
 
           // Fallback: directly search all model selector popups if the container class differs.
           const popups = Array.from(
-            document.querySelectorAll(CONSTANTS.SELECTORS.MODEL_SELECTOR_DROPDOWN)
+            document.querySelectorAll(
+              CONSTANTS.SELECTORS.MODEL_SELECTOR_DROPDOWN,
+            ),
           );
           for (const popup of popups) {
-            if (!popup.querySelector(CONSTANTS.SELECTORS.MODEL_SELECTOR_ITEM)) continue;
+            if (!popup.querySelector(CONSTANTS.SELECTORS.MODEL_SELECTOR_ITEM))
+              continue;
             const btn = ModelManager.findModelButton(popup, modelId);
             if (btn) return btn;
           }
@@ -1840,47 +1967,54 @@
         let menu = await Utils.waitForElement(menuSelector, 2000);
         if (!menu) {
           // Also try .ant-dropdown as fallback
-          menu = await Utils.waitForElement('.ant-dropdown', 1000);
+          menu = await Utils.waitForElement(".ant-dropdown", 1000);
           if (!menu) {
             console.warn("[QwenPersona] Model selector menu not found");
             return false;
           }
         }
 
-        let modelButton = ModelManager.findModelButton(menu, modelId) || findModelInOpenDropdowns();
+        let modelButton =
+          ModelManager.findModelButton(menu, modelId) ||
+          findModelInOpenDropdowns();
 
         if (!modelButton) {
           // Look for the "展开更多模型" button which opens a secondary dropdown
           const expandBtn = menu.querySelector(
-            CONSTANTS.SELECTORS.MODEL_SELECTOR_VIEW_MORE
+            CONSTANTS.SELECTORS.MODEL_SELECTOR_VIEW_MORE,
           );
           console.log("[QwenPersona] Expand button:", expandBtn);
 
           if (expandBtn) {
             const textEl = expandBtn.querySelector(
-              CONSTANTS.SELECTORS.MODEL_VIEW_MORE_TEXT
+              CONSTANTS.SELECTORS.MODEL_VIEW_MORE_TEXT,
             );
-            const text = textEl ? textEl.textContent : expandBtn.textContent || "";
+            const text = textEl
+              ? textEl.textContent
+              : expandBtn.textContent || "";
 
             const isExpanded = text.includes("折叠") || text.includes("收起");
             console.log("[QwenPersona] Menu expanded state:", isExpanded);
 
             if (!isExpanded) {
-              console.log("[QwenPersona] Hovering over expand button to trigger secondary menu...");
-              
+              console.log(
+                "[QwenPersona] Hovering over expand button to trigger secondary menu...",
+              );
+
               // The "展开更多模型" button triggers a secondary dropdown on hover/click
               // It's wrapped in an ant-dropdown-trigger
-              const triggerWrapper = expandBtn.closest('.ant-dropdown-trigger') || expandBtn;
-              
+              const triggerWrapper =
+                expandBtn.closest(".ant-dropdown-trigger") || expandBtn;
+
               // Trigger hover-based submenu (some builds require mouseover/mousemove).
               triggerWrapper.dispatchEvent(
-                new MouseEvent("mouseenter", { bubbles: true })
+                new MouseEvent("mouseenter", { bubbles: true }),
               );
               triggerWrapper.dispatchEvent(
-                new MouseEvent("mouseover", { bubbles: true })
+                new MouseEvent("mouseover", { bubbles: true }),
               );
               triggerWrapper.dispatchEvent(
-                new MouseEvent("mousemove", { bubbles: true })
+                new MouseEvent("mousemove", { bubbles: true }),
               );
               await Utils.sleep(250);
 
@@ -1890,19 +2024,22 @@
               // Wait briefly for the secondary dropdown to mount.
               await Utils.waitForElement(
                 CONSTANTS.SELECTORS.MODEL_SELECTOR_DROPDOWN_SECONDARY,
-                1200
+                1200,
               );
               await Utils.sleep(200);
 
               // Prefer searching the secondary menu first if present.
               const secondaryMenu = document.querySelector(
-                CONSTANTS.SELECTORS.MODEL_SELECTOR_DROPDOWN_SECONDARY
+                CONSTANTS.SELECTORS.MODEL_SELECTOR_DROPDOWN_SECONDARY,
               );
               if (secondaryMenu) {
                 console.log(
-                  "[QwenPersona] Found secondary menu, searching for model..."
+                  "[QwenPersona] Found secondary menu, searching for model...",
                 );
-                modelButton = ModelManager.findModelButton(secondaryMenu, modelId);
+                modelButton = ModelManager.findModelButton(
+                  secondaryMenu,
+                  modelId,
+                );
               }
 
               // Robust fallback: search across all open dropdowns/popups.
@@ -1916,14 +2053,16 @@
         }
 
         if (modelButton) {
-          const itemContainer = modelButton.closest(
-            CONSTANTS.SELECTORS.MODEL_SELECTOR_ITEM
-          ) || modelButton;
+          const itemContainer =
+            modelButton.closest(CONSTANTS.SELECTORS.MODEL_SELECTOR_ITEM) ||
+            modelButton;
 
           if (
             itemContainer &&
-            Array.from(itemContainer.classList).some((c) =>
-              c.includes("model-item-selected") || c.includes("model-selector-item-selected")
+            Array.from(itemContainer.classList).some(
+              (c) =>
+                c.includes("model-item-selected") ||
+                c.includes("model-selector-item-selected"),
             )
           ) {
             console.log("[QwenPersona] Model already selected:", modelId);
@@ -1951,7 +2090,7 @@
 
     findModelButton(menu, modelId) {
       const modelItems = menu.querySelectorAll(
-        CONSTANTS.SELECTORS.MODEL_SELECTOR_ITEM
+        CONSTANTS.SELECTORS.MODEL_SELECTOR_ITEM,
       );
 
       console.log(
@@ -1959,7 +2098,7 @@
         modelId,
         "in",
         modelItems.length,
-        "items"
+        "items",
       );
 
       const normalize = (s) =>
@@ -1977,16 +2116,19 @@
         let nameEl = item.querySelector(CONSTANTS.SELECTORS.MODEL_NAME_TEXT);
         if (!nameEl) {
           // Fallback: look for any text element within the item
-          nameEl = item.querySelector('[class*="model-item-name"]') || 
-                   item.querySelector('[class*="model-name"]') ||
-                   item.querySelector('[class*="model-selector-item-name"]');
+          nameEl =
+            item.querySelector('[class*="model-item-name"]') ||
+            item.querySelector('[class*="model-name"]') ||
+            item.querySelector('[class*="model-selector-item-name"]');
         }
-        
+
         // Get text from the first span child if present, otherwise use textContent
-        let modelName = '';
+        let modelName = "";
         if (nameEl) {
-          const spanEl = nameEl.querySelector('span');
-          modelName = spanEl ? spanEl.textContent.trim() : nameEl.textContent.trim();
+          const spanEl = nameEl.querySelector("span");
+          modelName = spanEl
+            ? spanEl.textContent.trim()
+            : nameEl.textContent.trim();
         } else {
           modelName = item.textContent.trim();
         }
@@ -2012,15 +2154,18 @@
       for (const item of modelItems) {
         let nameEl = item.querySelector(CONSTANTS.SELECTORS.MODEL_NAME_TEXT);
         if (!nameEl) {
-          nameEl = item.querySelector('[class*="model-item-name"]') || 
-                   item.querySelector('[class*="model-name"]') ||
-                   item.querySelector('[class*="model-selector-item-name"]');
+          nameEl =
+            item.querySelector('[class*="model-item-name"]') ||
+            item.querySelector('[class*="model-name"]') ||
+            item.querySelector('[class*="model-selector-item-name"]');
         }
-        
-        let modelName = '';
+
+        let modelName = "";
         if (nameEl) {
-          const spanEl = nameEl.querySelector('span');
-          modelName = spanEl ? spanEl.textContent.trim() : nameEl.textContent.trim();
+          const spanEl = nameEl.querySelector("span");
+          modelName = spanEl
+            ? spanEl.textContent.trim()
+            : nameEl.textContent.trim();
         } else {
           modelName = item.textContent.trim();
         }
@@ -2055,7 +2200,7 @@
           keyCode: 27,
           which: 27,
           bubbles: true,
-        })
+        }),
       );
 
       setTimeout(() => {
@@ -2076,19 +2221,15 @@
   // ==================== Feature Service ====================
   const FeatureManager = {
     findDeepThinkingButton() {
-      // First try to find within the new container structure
-      const thinkingContainer = document.querySelector(
-        CONSTANTS.SELECTORS.DEEP_THINKING_CONTAINER
+      // Look for the thinking button in the new UI
+      const thinkingBtn = document.querySelector(
+        CONSTANTS.SELECTORS.DEEP_THINKING_CONTAINER,
       );
-      if (thinkingContainer) {
-        const btn = thinkingContainer.querySelector(
-          CONSTANTS.SELECTORS.CHAT_INPUT_FEATURE_BTN
-        );
-        if (btn) return btn;
-      }
+      if (thinkingBtn) return thinkingBtn;
 
+      // Fallback for older UI
       const buttons = document.querySelectorAll(
-        CONSTANTS.SELECTORS.CHAT_INPUT_FEATURE_BTN
+        CONSTANTS.SELECTORS.CHAT_INPUT_FEATURE_BTN,
       );
       for (const btn of buttons) {
         const use = btn.querySelector("use");
@@ -2098,7 +2239,8 @@
         ) {
           return btn;
         }
-        if (use &&
+        if (
+          use &&
           use.getAttribute("xlink:href")?.includes("icon-fill-deepthink-01")
         ) {
           return btn;
@@ -2113,7 +2255,7 @@
 
       for (const btn of buttons) {
         const textEl = btn.querySelector(
-          CONSTANTS.SELECTORS.CHAT_INPUT_FEATURE_TEXT
+          CONSTANTS.SELECTORS.CHAT_INPUT_FEATURE_TEXT,
         );
         if (textEl && textEl.textContent.includes("深度思考")) {
           return btn;
@@ -2128,7 +2270,7 @@
       if (btn) return btn;
 
       const buttons = document.querySelectorAll(
-        CONSTANTS.SELECTORS.CHAT_INPUT_FEATURE_BTN
+        CONSTANTS.SELECTORS.CHAT_INPUT_FEATURE_BTN,
       );
       for (const b of buttons) {
         const use = b.querySelector("use");
@@ -2145,7 +2287,7 @@
 
       for (const b of buttons) {
         const textEl = b.querySelector(
-          CONSTANTS.SELECTORS.CHAT_INPUT_FEATURE_TEXT
+          CONSTANTS.SELECTORS.CHAT_INPUT_FEATURE_TEXT,
         );
         if (textEl && textEl.textContent.includes("搜索")) {
           return b;
@@ -2157,6 +2299,9 @@
 
     isFeatureButtonActive(button) {
       if (!button) return false;
+
+      // Check for new Thinking Button state
+      if (button.classList.contains("thinking-button-active")) return true;
 
       // Check for common active states
       if (button.classList.contains("active")) return true;
@@ -2199,7 +2344,11 @@
       ) {
         // Has a background color, might be active
         // Check if it matches the brand color pattern
-        if (bgColor.includes("97") || bgColor.includes("92") || bgColor.includes("237")) {
+        if (
+          bgColor.includes("97") ||
+          bgColor.includes("92") ||
+          bgColor.includes("237")
+        ) {
           return true;
         }
       }
@@ -2208,7 +2357,8 @@
     },
 
     async simulateDeepThinking(enabled) {
-      console.log("[QwenPersona] Setting deep thinking to:", enabled);
+      const isEnabled = enabled === "enabled" || enabled === true;
+      console.log("[QwenPersona] Setting deep thinking to:", isEnabled);
 
       const button = FeatureManager.findDeepThinkingButton();
       if (!button) {
@@ -2219,10 +2369,10 @@
       const currentlyActive = FeatureManager.isFeatureButtonActive(button);
       console.log(
         "[QwenPersona] Deep thinking currently active:",
-        currentlyActive
+        currentlyActive,
       );
 
-      if (currentlyActive !== enabled) {
+      if (currentlyActive !== isEnabled) {
         button.click();
         console.log("[QwenPersona] Clicked deep thinking button");
         await Utils.sleep(100);
@@ -2234,29 +2384,10 @@
     },
 
     async simulateWebSearch(enabled) {
-      console.log("[QwenPersona] Setting web search to:", enabled);
-
-      const button = FeatureManager.findWebSearchButton();
-      if (!button) {
-        console.warn("[QwenPersona] Web search button not found");
-        return false;
-      }
-
-      const currentlyActive = FeatureManager.isFeatureButtonActive(button);
       console.log(
-        "[QwenPersona] Web search currently active:",
-        currentlyActive
+        "[QwenPersona] Web search button removed. Control is now handled via prompt injection.",
       );
-
-      if (currentlyActive !== enabled) {
-        button.click();
-        console.log("[QwenPersona] Clicked web search button");
-        await Utils.sleep(100);
-        return true;
-      } else {
-        console.log("[QwenPersona] Web search already in desired state");
-        return true;
-      }
+      return true;
     },
 
     async applyFeatureSettings(persona) {
@@ -2264,11 +2395,9 @@
 
       await Utils.sleep(200);
 
-      const deepThinkingEnabled = persona.deepThinking === true;
-      await FeatureManager.simulateDeepThinking(deepThinkingEnabled);
-
-      const webSearchEnabled = persona.webSearch === true;
-      await FeatureManager.simulateWebSearch(webSearchEnabled);
+      // deepThinking can be 'enabled', 'disabled', or 'user' (or boolean for legacy)
+      await FeatureManager.simulateDeepThinking(persona.deepThinking);
+      // Web search is applied dynamically in NetworkManager via persona.webSearch string ('auto', 'enabled', 'disabled')
     },
   };
 
@@ -2323,7 +2452,7 @@
           "[QwenPersona] Mapped chat",
           chatId,
           "to persona",
-          personaId
+          personaId,
         );
         Debug.log("chatPersonaMap[chatId] now", {
           chatId,
@@ -2368,7 +2497,7 @@
 
       const startNavbarObserver = () => {
         const navbar = document.querySelector(
-          CONSTANTS.SELECTORS.HEADER_DESKTOP
+          CONSTANTS.SELECTORS.HEADER_DESKTOP,
         );
         if (navbar) {
           navbarObserver.observe(navbar, { childList: true, subtree: true });
@@ -2390,7 +2519,7 @@
         "[QwenPersona] URL changed:",
         State.lastUrl,
         "->",
-        currentUrl
+        currentUrl,
       );
 
       const prevChatId = ChatManager.getCurrentChatId(State.lastUrl);
@@ -2423,7 +2552,7 @@
       ) {
         console.log(
           "[QwenPersona] New chat detected, mapping current persona:",
-          State.selectedPersonaId
+          State.selectedPersonaId,
         );
         State.chatPersonaMap[currChatId] = State.selectedPersonaId;
         Storage.saveChatPersonaMap();
@@ -2437,21 +2566,28 @@
         });
       }
 
-      // If we navigated FROM a real chat TO the start page/pseudo route, 
-      // reset the persona to "No Persona" to avoid carrying over selection 
+      // If we navigated FROM a real chat TO the start page/pseudo route,
+      // reset the persona to "No Persona" to avoid carrying over selection
       // from the previous chat session into the next one unexpectedly.
       if (prevChatId && !currChatId) {
-        console.log("[QwenPersona] Navigated away from chat, resetting persona");
+        console.log(
+          "[QwenPersona] Navigated away from chat, resetting persona",
+        );
         Debug.log("Resetting persona on navigation to home", { prevChatId });
         PersonaManager.selectPersona(null);
       }
 
       // Bridge: if we just sent the first message of a new chat, bind the pending persona
       // to the chatId once the URL shows it.
-      if (currChatId && !State.chatPersonaMap[currChatId] && State.pendingNewChatPersona) {
+      if (
+        currChatId &&
+        !State.chatPersonaMap[currChatId] &&
+        State.pendingNewChatPersona
+      ) {
         const ageMs = Date.now() - (State.pendingNewChatPersona.ts || 0);
         if (ageMs >= 0 && ageMs < 15000) {
-          State.chatPersonaMap[currChatId] = State.pendingNewChatPersona.personaId;
+          State.chatPersonaMap[currChatId] =
+            State.pendingNewChatPersona.personaId;
           Storage.saveChatPersonaMap();
           Debug.log("bridged pending persona to chat", {
             currChatId,
@@ -2558,7 +2694,9 @@
       // Clean up any stored chat mappings pointing to this persona
       try {
         let changed = false;
-        for (const [chatId, personaId] of Object.entries(State.chatPersonaMap)) {
+        for (const [chatId, personaId] of Object.entries(
+          State.chatPersonaMap,
+        )) {
           if (personaId === id) {
             delete State.chatPersonaMap[chatId];
             changed = true;
@@ -2578,20 +2716,20 @@
         .getElementById(CONSTANTS.SELECTORS.INPUT_NAME)
         .value.trim();
       const emoji = document.getElementById(
-        CONSTANTS.SELECTORS.INPUT_EMOJI
+        CONSTANTS.SELECTORS.INPUT_EMOJI,
       ).value;
       const model = document.getElementById(
-        CONSTANTS.SELECTORS.INPUT_MODEL
+        CONSTANTS.SELECTORS.INPUT_MODEL,
       ).value;
       const prompt = document
         .getElementById(CONSTANTS.SELECTORS.INPUT_PROMPT)
         .value.trim();
       const deepThinking = document.getElementById(
-        CONSTANTS.SELECTORS.INPUT_DEEP_THINKING
-      ).checked;
+        CONSTANTS.SELECTORS.INPUT_DEEP_THINKING,
+      ).value;
       const webSearch = document.getElementById(
-        CONSTANTS.SELECTORS.INPUT_WEB_SEARCH
-      ).checked;
+        CONSTANTS.SELECTORS.INPUT_WEB_SEARCH,
+      ).value;
 
       if (!name) {
         alert(I18n.t("nameRequired"));
@@ -2721,7 +2859,7 @@
 
       if (recordedPersonaId) {
         const personaExists = State.personas.find(
-          (p) => p.id === recordedPersonaId
+          (p) => p.id === recordedPersonaId,
         );
         Debug.log("autoSelect: mapping exists", {
           chatId,
@@ -2734,16 +2872,19 @@
               "[QwenPersona] Auto-selecting persona for chat:",
               chatId,
               "->",
-              recordedPersonaId
+              recordedPersonaId,
             );
             PersonaManager.selectPersona(recordedPersonaId);
           }
         } else {
           // Mapping points to a deleted/nonexistent persona. Remove it to avoid repeated flips.
-          Debug.warn("autoSelect: mapping points to missing persona; deleting mapping", {
-            chatId,
-            recordedPersonaId,
-          });
+          Debug.warn(
+            "autoSelect: mapping points to missing persona; deleting mapping",
+            {
+              chatId,
+              recordedPersonaId,
+            },
+          );
           delete State.chatPersonaMap[chatId];
           Storage.saveChatPersonaMap();
           if (State.selectedPersonaId) PersonaManager.selectPersona(null);
@@ -2755,7 +2896,7 @@
         });
         if (State.selectedPersonaId) {
           console.log(
-            "[QwenPersona] No mapping for this chat, resetting to None"
+            "[QwenPersona] No mapping for this chat, resetting to None",
           );
           PersonaManager.selectPersona(null);
         }
@@ -2769,7 +2910,7 @@
       const originalFetch = window.fetch;
 
       window.fetch = async function (url, options = {}) {
-        const urlStr = typeof url === "string" ? url : (url.url || "");
+        const urlStr = typeof url === "string" ? url : url.url || "";
 
         // Legacy: previous versions attempted to hide plaintext "[System Instruction]"
         // markers in chat history by rewriting GET /api/v2/chats responses. That
@@ -2780,7 +2921,7 @@
         // 2. Intercept Completions (Injection logic)
         if (urlStr.includes("/api/v2/chat/completions")) {
           const persona = State.personas.find(
-            (p) => p.id === State.selectedPersonaId
+            (p) => p.id === State.selectedPersonaId,
           );
 
           if (persona && options.body) {
@@ -2831,7 +2972,7 @@
                   ts: Date.now(),
                   reason: "first_message_new_chat_request",
                 };
-                
+
                 const currChatId = ChatManager.getCurrentChatId();
                 if (currChatId && !State.chatPersonaMap[currChatId]) {
                   State.chatPersonaMap[currChatId] = persona.id;
@@ -2842,14 +2983,38 @@
 
               // Only inject system prompt if it's a new chat or if a system message is already present in the request.
               // Re-injecting system prompts on follow-up turns in an existing chat causes "no more than one system message" error.
-              if (persona.prompt && Array.isArray(body.messages) && (isNewChat || hasSystemMessage)) {
+              if (
+                (persona.prompt || persona.webSearch) &&
+                Array.isArray(body.messages) &&
+                (isNewChat || hasSystemMessage)
+              ) {
                 // Always upsert a system message at messages[0] with persona prompt and metadata.
                 // This is more explicit and increases the chance the backend will honor the persona.
-                const systemMsgIndex = body.messages.findIndex((m) => m.role === "system");
+                const systemMsgIndex = body.messages.findIndex(
+                  (m) => m.role === "system",
+                );
+
+                let content = persona.prompt || "";
+
+                // Inject web search instructions
+                if (persona.webSearch && persona.webSearch !== "auto") {
+                  const searchPrompt =
+                    persona.webSearch === "enabled"
+                      ? "请使用网络搜索"
+                      : "禁止使用网络搜索";
+                  content = content
+                    ? `${content}\n\n[Instruction]\n${searchPrompt}`
+                    : searchPrompt;
+                } else if (persona.webSearch === "auto") {
+                  const searchPrompt = "请根据情况自行推断是否使用网络搜索";
+                  content = content
+                    ? `${content}\n\n[Instruction]\n${searchPrompt}`
+                    : searchPrompt;
+                }
 
                 const systemMessage = {
                   role: "system",
-                  content: persona.prompt,
+                  content: content,
                   extra: {
                     injected_by: "qwen_persona",
                     personaId: persona.id,
@@ -2857,14 +3022,22 @@
                   },
                   fid: Utils.generateFid(),
                   timestamp: Date.now(),
-                  models: body.model ? [body.model] : persona.model ? [persona.model] : [],
+                  models: body.model
+                    ? [body.model]
+                    : persona.model
+                      ? [persona.model]
+                      : [],
                 };
 
                 if (systemMsgIndex !== -1) {
                   // Replace existing system message content and metadata
                   const sys = body.messages[systemMsgIndex];
                   sys.content = systemMessage.content;
-                  sys.extra = Object.assign({}, sys.extra || {}, systemMessage.extra);
+                  sys.extra = Object.assign(
+                    {},
+                    sys.extra || {},
+                    systemMessage.extra,
+                  );
                   sys.fid = sys.fid || systemMessage.fid;
                   sys.timestamp = sys.timestamp || systemMessage.timestamp;
                   if (systemMsgIndex !== 0) {
@@ -2886,7 +3059,10 @@
 
               if (modified) {
                 options.body = JSON.stringify(body);
-                console.log("[QwenPersona] Request modified with persona:", persona.name);
+                console.log(
+                  "[QwenPersona] Request modified with persona:",
+                  persona.name,
+                );
 
                 // Track injection with metadata
                 try {
@@ -2894,12 +3070,17 @@
                     State.chatInjectedMap[chatId] = {
                       personaId: persona.id,
                       ts: Date.now(),
-                      method: body.messages && body.messages[0] && body.messages[0].role === 'system' ? 'system_message' : 'body_extra',
+                      method:
+                        body.messages &&
+                        body.messages[0] &&
+                        body.messages[0].role === "system"
+                          ? "system_message"
+                          : "body_extra",
                     };
                     Storage.saveChatInjectedMap();
                   }
                 } catch (e) {
-                  Debug.warn('Failed to record chatInjectedMap metadata', e);
+                  Debug.warn("Failed to record chatInjectedMap metadata", e);
                 }
               }
             } catch (e) {
@@ -2945,7 +3126,9 @@
     // Reset to "No Persona" on initial load if we start on the home page or a pseudo-chat page
     const startId = ChatManager.getCurrentChatId();
     if (!startId) {
-      console.log("[QwenPersona] Starting on home/pseudo page, resetting persona");
+      console.log(
+        "[QwenPersona] Starting on home/pseudo page, resetting persona",
+      );
       PersonaManager.selectPersona(null);
     }
 
@@ -2964,13 +3147,14 @@
           chatId,
           selectedPersonaId: State.selectedPersonaId,
           selectedPersonaName:
-            State.personas.find((p) => p.id === State.selectedPersonaId)?.name ||
-            null,
+            State.personas.find((p) => p.id === State.selectedPersonaId)
+              ?.name || null,
           recordedPersonaId: chatId ? State.chatPersonaMap[chatId] : null,
           recordedPersonaName:
             chatId && State.chatPersonaMap[chatId]
-              ? State.personas.find((p) => p.id === State.chatPersonaMap[chatId])
-                  ?.name || null
+              ? State.personas.find(
+                  (p) => p.id === State.chatPersonaMap[chatId],
+                )?.name || null
               : null,
           pendingNewChatPersona: State.pendingNewChatPersona,
           mapSize: Object.keys(State.chatPersonaMap || {}).length,
@@ -2994,7 +3178,7 @@
 
       // Close emoji picker when clicking outside
       const emojiPickerContainer = document.getElementById(
-        "persona-emoji-picker"
+        "persona-emoji-picker",
       );
       const emojiBtn = document.getElementById("persona-emoji-trigger-btn");
       if (emojiPickerContainer && emojiBtn) {
