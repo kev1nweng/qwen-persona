@@ -133,11 +133,11 @@
       ANT_DROPDOWN_TRIGGER: ".ant-dropdown-trigger",
       CHAT_INPUT_FEATURE_BTN: ".chat-input-feature-btn",
       CHAT_INPUT_FEATURE_TEXT: ".chat-input-feature-btn-text",
-      DEEP_THINKING_CONTAINER: ".chat-message-input-thinking-budget-btn",
-      WEB_SEARCH_BTN: "button.websearch_button",
-      TEXTAREA: "textarea#chat-input, textarea.chat-input, textarea",
-      INPUT_CONTAINER: ".prompt-input-container, .chat-input-container, .chat-message-input-container-inner",
-      CHAT_MESSAGE_INPUT: ".chat-message-input, #chat-message-input",
+      DEEP_THINKING_CONTAINER: ".thinking-button",
+      WEB_SEARCH_BTN: null, // Search button removed in new UI
+      TEXTAREA: ".message-input-textarea",
+      INPUT_CONTAINER: ".message-input-container-area",
+      CHAT_MESSAGE_INPUT: ".message-input-container",
       CHAT_PROMPT_INPUT_CONTAINER: ".chat-prompt-input-container, .chat-prompt-input",
 
       // Classes
@@ -195,9 +195,14 @@
           "This prompt will be injected as a system message, overriding default prompts.",
         features: "Features",
         deepThinking: "Deep Thinking",
+        deepThinkingDisabled: "Default Disabled",
+        deepThinkingEnabled: "Auto Enabled",
         webSearch: "Web Search",
+        webSearchDisabled: "Disable",
+        webSearchEnabled: "Enable",
+        webSearchAuto: "Auto (Let AI decide)",
         featuresHint:
-          "Enabled features will be automatically activated for each chat.",
+          "Enabled features will be automatically activated for each chat. Web search is controlled via system prompt injection.",
         cancel: "Cancel",
         save: "Save",
         deleteConfirm: "Are you sure you want to delete this Persona?",
@@ -229,8 +234,13 @@
         promptHint: "此提示词将作为系统消息注入到对话中，优先于默认系统提示",
         features: "增强功能",
         deepThinking: "深度思考",
+        deepThinkingDisabled: "默认禁用",
+        deepThinkingEnabled: "自动启用",
         webSearch: "联网搜索",
-        featuresHint: "启用后将在每次对话时自动开启对应功能",
+        webSearchDisabled: "禁止使用",
+        webSearchEnabled: "强制开启",
+        webSearchAuto: "自动 (由 AI 判断)",
+        featuresHint: "启用后将在每次对话时自动开启对应功能。联网搜索通过在提示词中注入指令控制。",
         cancel: "取消",
         save: "保存",
         deleteConfirm: "确定要删除这个 Persona 吗？",
@@ -312,7 +322,20 @@
     loadPersonas() {
       try {
         const stored = localStorage.getItem(CONSTANTS.STORAGE.PERSONAS);
-        State.personas = stored ? JSON.parse(stored) : [];
+        let personas = stored ? JSON.parse(stored) : [];
+        
+        // Migrate old personas (boolean webSearch -> string webSearch)
+        personas = personas.map(p => {
+          if (typeof p.webSearch === 'boolean') {
+            p.webSearch = p.webSearch ? 'enabled' : 'auto';
+          }
+          if (typeof p.deepThinking === 'boolean') {
+            p.deepThinking = p.deepThinking ? 'enabled' : 'disabled';
+          }
+          return p;
+        });
+        
+        State.personas = personas;
       } catch (e) {
         console.error("[QwenPersona] Failed to load personas:", e);
         State.personas = [];
@@ -1092,6 +1115,50 @@
                 --input-font-color: #e0e2eb;
                 --button-hover-background: #2a2a2a;
             }
+
+            /* Segmented Control Styles */
+            .persona-segmented-control {
+                display: flex;
+                background: var(--container-secondary-fill, #f7f8fc);
+                border-radius: 12px;
+                padding: 4px;
+                gap: 4px;
+                border: 1px solid var(--line-secondary-border, #e0e2eb);
+            }
+
+            .persona-segment {
+                flex: 1;
+                padding: 8px;
+                text-align: center;
+                font-size: 13px;
+                font-weight: 500;
+                color: var(--character-tertiary-text, #8f91a8);
+                cursor: pointer;
+                border-radius: 8px;
+                transition: all 0.2s ease;
+                user-select: none;
+            }
+
+            .persona-segment:hover {
+                color: var(--character-primary-text, #2c2c36);
+                background: rgba(0, 0, 0, 0.05);
+            }
+
+            .persona-segment.active {
+                background: var(--container-primary-fill, #fff);
+                color: var(--btn-brandprimary-fill, #615ced);
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            }
+
+            html.dark .persona-segmented-control {
+                background: #1a1a1a;
+                border-color: #444;
+            }
+
+            html.dark .persona-segment.active {
+                background: #333;
+                color: #8c88ff;
+            }
       `;
       document.head.appendChild(style);
     },
@@ -1167,17 +1234,18 @@
 
       State.personas.forEach((persona) => {
         let featureBadges = "";
-        if (persona.deepThinking || persona.webSearch) {
+        const hasWebSearch = persona.webSearch && persona.webSearch !== 'disabled';
+        const isDeepThinking = persona.deepThinking === 'enabled';
+        if (isDeepThinking || hasWebSearch) {
           featureBadges = '<div class="persona-dropdown-item-features">';
-          if (persona.deepThinking) {
+          if (isDeepThinking) {
             featureBadges += `<span class="persona-feature-badge active">${I18n.t(
               "deepThinking"
             )}</span>`;
           }
-          if (persona.webSearch) {
-            featureBadges += `<span class="persona-feature-badge active">${I18n.t(
-              "webSearch"
-            )}</span>`;
+          if (hasWebSearch) {
+            const label = persona.webSearch === 'auto' ? `${I18n.t("webSearch")}(Auto)` : I18n.t("webSearch");
+            featureBadges += `<span class="persona-feature-badge active">${label}</span>`;
           }
           featureBadges += "</div>";
         }
@@ -1425,39 +1493,36 @@
                 </div>
                 <div class="persona-form-group">
                     <label class="persona-form-label">${I18n.t(
-                      "features"
+                      "deepThinking"
                     )}</label>
-                    <div class="persona-form-checkbox-group">
-                        <label class="persona-form-checkbox-item">
-                            <input type="checkbox" class="persona-form-checkbox" id="${
-                              CONSTANTS.SELECTORS.INPUT_DEEP_THINKING
-                            }"
-                                   ${
-                                     persona && persona.deepThinking
-                                       ? "checked"
-                                       : ""
-                                   }>
-                            <span class="persona-form-checkbox-label">${I18n.t(
-                              "deepThinking"
-                            )}</span>
-                        </label>
-                        <label class="persona-form-checkbox-item">
-                            <input type="checkbox" class="persona-form-checkbox" id="${
-                              CONSTANTS.SELECTORS.INPUT_WEB_SEARCH
-                            }"
-                                   ${
-                                     persona && persona.webSearch
-                                       ? "checked"
-                                       : ""
-                                   }>
-                            <span class="persona-form-checkbox-label">${I18n.t(
-                              "webSearch"
-                            )}</span>
-                        </label>
+                    <div class="persona-segmented-control" id="deep-thinking-segmented">
+                        <div class="persona-segment ${
+                          (!persona || persona.deepThinking !== "enabled") ? "active" : ""
+                        }" data-value="disabled">${I18n.t("deepThinkingDisabled")}</div>
+                        <div class="persona-segment ${
+                          (persona && persona.deepThinking === "enabled") ? "active" : ""
+                        }" data-value="enabled">${I18n.t("deepThinkingEnabled")}</div>
+                        <input type="hidden" id="${
+                          CONSTANTS.SELECTORS.INPUT_DEEP_THINKING
+                        }" value="${persona ? (persona.deepThinking === "enabled" ? "enabled" : "disabled") : "disabled"}">
                     </div>
-                    <div class="persona-form-hint">${I18n.t(
-                      "featuresHint"
-                    )}</div>
+                </div>
+                <div class="persona-form-group">
+                    <label class="persona-form-label">${I18n.t("webSearch")}</label>
+                    <div class="persona-segmented-control" id="web-search-segmented">
+                        <div class="persona-segment ${
+                          (persona && persona.webSearch === "disabled") ? "active" : ""
+                        }" data-value="disabled">${I18n.t("webSearchDisabled")}</div>
+                        <div class="persona-segment ${
+                          (!persona || persona.webSearch === "auto") ? "active" : ""
+                        }" data-value="auto">${I18n.t("webSearchAuto")}</div>
+                        <div class="persona-segment ${
+                          (persona && persona.webSearch === "enabled") ? "active" : ""
+                        }" data-value="enabled">${I18n.t("webSearchEnabled")}</div>
+                        <input type="hidden" id="${
+                          CONSTANTS.SELECTORS.INPUT_WEB_SEARCH
+                        }" value="${persona ? (persona.webSearch || "auto") : "auto"}">
+                    </div>
                 </div>
             </div>
             <div class="persona-modal-footer">
@@ -1469,6 +1534,25 @@
                 }">${I18n.t("save")}</button>
             </div>
         `;
+
+      // Segmented Control Logic
+      const setupSegmented = (id, inputId) => {
+        const container = document.getElementById(id);
+        if (container) {
+          const segments = container.querySelectorAll(".persona-segment");
+          const hiddenInput = document.getElementById(inputId);
+          segments.forEach(seg => {
+            seg.onclick = () => {
+              segments.forEach(s => s.classList.remove("active"));
+              seg.classList.add("active");
+              hiddenInput.value = seg.dataset.value;
+            };
+          });
+        }
+      };
+
+      setupSegmented("deep-thinking-segmented", CONSTANTS.SELECTORS.INPUT_DEEP_THINKING);
+      setupSegmented("web-search-segmented", CONSTANTS.SELECTORS.INPUT_WEB_SEARCH);
 
       // Emoji Picker Logic
       const emojiBtn = document.getElementById("persona-emoji-trigger-btn");
@@ -2063,17 +2147,13 @@
   // ==================== Feature Service ====================
   const FeatureManager = {
     findDeepThinkingButton() {
-      // First try to find within the new container structure
-      const thinkingContainer = document.querySelector(
+      // Look for the thinking button in the new UI
+      const thinkingBtn = document.querySelector(
         CONSTANTS.SELECTORS.DEEP_THINKING_CONTAINER
       );
-      if (thinkingContainer) {
-        const btn = thinkingContainer.querySelector(
-          CONSTANTS.SELECTORS.CHAT_INPUT_FEATURE_BTN
-        );
-        if (btn) return btn;
-      }
+      if (thinkingBtn) return thinkingBtn;
 
+      // Fallback for older UI
       const buttons = document.querySelectorAll(
         CONSTANTS.SELECTORS.CHAT_INPUT_FEATURE_BTN
       );
@@ -2145,6 +2225,9 @@
     isFeatureButtonActive(button) {
       if (!button) return false;
 
+      // Check for new Thinking Button state
+      if (button.classList.contains("thinking-button-active")) return true;
+
       // Check for common active states
       if (button.classList.contains("active")) return true;
       if (button.classList.contains("checked")) return true;
@@ -2195,7 +2278,8 @@
     },
 
     async simulateDeepThinking(enabled) {
-      console.log("[QwenPersona] Setting deep thinking to:", enabled);
+      const isEnabled = enabled === 'enabled' || enabled === true;
+      console.log("[QwenPersona] Setting deep thinking to:", isEnabled);
 
       const button = FeatureManager.findDeepThinkingButton();
       if (!button) {
@@ -2209,7 +2293,7 @@
         currentlyActive
       );
 
-      if (currentlyActive !== enabled) {
+      if (currentlyActive !== isEnabled) {
         button.click();
         console.log("[QwenPersona] Clicked deep thinking button");
         await Utils.sleep(100);
@@ -2221,29 +2305,8 @@
     },
 
     async simulateWebSearch(enabled) {
-      console.log("[QwenPersona] Setting web search to:", enabled);
-
-      const button = FeatureManager.findWebSearchButton();
-      if (!button) {
-        console.warn("[QwenPersona] Web search button not found");
-        return false;
-      }
-
-      const currentlyActive = FeatureManager.isFeatureButtonActive(button);
-      console.log(
-        "[QwenPersona] Web search currently active:",
-        currentlyActive
-      );
-
-      if (currentlyActive !== enabled) {
-        button.click();
-        console.log("[QwenPersona] Clicked web search button");
-        await Utils.sleep(100);
-        return true;
-      } else {
-        console.log("[QwenPersona] Web search already in desired state");
-        return true;
-      }
+      console.log("[QwenPersona] Web search button removed. Control is now handled via prompt injection.");
+      return true;
     },
 
     async applyFeatureSettings(persona) {
@@ -2251,11 +2314,9 @@
 
       await Utils.sleep(200);
 
-      const deepThinkingEnabled = persona.deepThinking === true;
-      await FeatureManager.simulateDeepThinking(deepThinkingEnabled);
-
-      const webSearchEnabled = persona.webSearch === true;
-      await FeatureManager.simulateWebSearch(webSearchEnabled);
+      // deepThinking can be 'enabled', 'disabled', or 'user' (or boolean for legacy)
+      await FeatureManager.simulateDeepThinking(persona.deepThinking);
+      // Web search is applied dynamically in NetworkManager via persona.webSearch string ('auto', 'enabled', 'disabled')
     },
   };
 
@@ -2575,10 +2636,10 @@
         .value.trim();
       const deepThinking = document.getElementById(
         CONSTANTS.SELECTORS.INPUT_DEEP_THINKING
-      ).checked;
+      ).value;
       const webSearch = document.getElementById(
         CONSTANTS.SELECTORS.INPUT_WEB_SEARCH
-      ).checked;
+      ).value;
 
       if (!name) {
         alert(I18n.t("nameRequired"));
@@ -2829,14 +2890,27 @@
 
               // Only inject system prompt if it's a new chat or if a system message is already present in the request.
               // Re-injecting system prompts on follow-up turns in an existing chat causes "no more than one system message" error.
-              if (persona.prompt && Array.isArray(body.messages) && (isNewChat || hasSystemMessage)) {
+              if ((persona.prompt || persona.webSearch) && Array.isArray(body.messages) && (isNewChat || hasSystemMessage)) {
                 // Always upsert a system message at messages[0] with persona prompt and metadata.
                 // This is more explicit and increases the chance the backend will honor the persona.
                 const systemMsgIndex = body.messages.findIndex((m) => m.role === "system");
 
+                let content = persona.prompt || "";
+                
+                // Inject web search instructions
+                if (persona.webSearch && persona.webSearch !== 'auto') {
+                  const searchPrompt = persona.webSearch === 'enabled' 
+                    ? "请使用网络搜索" 
+                    : "禁止使用网络搜索";
+                  content = content ? `${content}\n\n[Instruction]\n${searchPrompt}` : searchPrompt;
+                } else if (persona.webSearch === 'auto') {
+                  const searchPrompt = "请根据情况自行推断是否使用网络搜索";
+                  content = content ? `${content}\n\n[Instruction]\n${searchPrompt}` : searchPrompt;
+                }
+
                 const systemMessage = {
                   role: "system",
-                  content: persona.prompt,
+                  content: content,
                   extra: {
                     injected_by: "qwen_persona",
                     personaId: persona.id,
